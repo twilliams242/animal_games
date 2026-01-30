@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echolocating Bat - Sensory Simulation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #4a9eff;
+            text-align: center;
+            padding: 30px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #4a9eff;
+            border-radius: 10px;
+            z-index: 100;
+            max-width: 500px;
+        }
+        #instructions h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #ffcc00;
+        }
+        #instructions p {
+            margin: 10px 0;
+            line-height: 1.6;
+        }
+        #instructions .key {
+            display: inline-block;
+            background: #333;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid #666;
+            margin: 0 2px;
+        }
+        #instructions button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            font-size: 16px;
+            background: #4a9eff;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        #instructions button:hover {
+            background: #ffcc00;
+        }
+        #hud {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: #4a9eff;
+            font-size: 14px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(74, 158, 255, 0.5);
+            border-radius: 50%;
+            z-index: 50;
+            pointer-events: none;
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="instructions">
+        <h1>🦇 The Echolocating Bat</h1>
+        <p>Experience the world through biological sonar.</p>
+        <p>
+            <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> - Fly around<br>
+            <span class="key">SPACE</span> - Ascend | <span class="key">SHIFT</span> - Descend<br>
+            <span class="key">MOUSE</span> - Look around<br>
+            <span class="key">CLICK</span> - Emit sonar pulse
+        </p>
+        <p style="color: #ffcc00; margin-top: 15px;">
+            Close objects glow warm (yellow)<br>
+            Far objects appear cool (blue)
+        </p>
+        <button id="startBtn">Enter the Cave</button>
+    </div>
+
+    <div id="hud" class="hidden">
+        <div>Altitude: <span id="altitude">0</span>m</div>
+        <div>Pulses: <span id="pulseCount">0</span></div>
+        <div style="margin-top: 10px; color: #666;">Click to echolocate</div>
+    </div>
+
+    <div id="crosshair" class="hidden"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // ============================================
+        // AUDIO SYSTEM - Spatial Echolocation Sound
+        // ============================================
+        class EcholocationAudio {
+            constructor() {
+                this.audioContext = null;
+                this.listener = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.listener = this.audioContext.listener;
+                this.initialized = true;
+            }
+
+            updateListenerPosition(position, forward, up) {
+                if (!this.initialized) return;
+                const listener = this.listener;
+
+                if (listener.positionX) {
+                    listener.positionX.setValueAtTime(position.x, this.audioContext.currentTime);
+                    listener.positionY.setValueAtTime(position.y, this.audioContext.currentTime);
+                    listener.positionZ.setValueAtTime(position.z, this.audioContext.currentTime);
+                    listener.forwardX.setValueAtTime(forward.x, this.audioContext.currentTime);
+                    listener.forwardY.setValueAtTime(forward.y, this.audioContext.currentTime);
+                    listener.forwardZ.setValueAtTime(forward.z, this.audioContext.currentTime);
+                    listener.upX.setValueAtTime(up.x, this.audioContext.currentTime);
+                    listener.upY.setValueAtTime(up.y, this.audioContext.currentTime);
+                    listener.upZ.setValueAtTime(up.z, this.audioContext.currentTime);
+                } else {
+                    listener.setPosition(position.x, position.y, position.z);
+                    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+                }
+            }
+
+            emitChirp() {
+                if (!this.initialized) return;
+
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                // Create ultrasonic-style chirp (frequency sweep)
+                const oscillator = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(4000, now);
+                oscillator.frequency.exponentialRampToValueAtTime(1500, now + 0.08);
+
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(ctx.destination);
+
+                oscillator.start(now);
+                oscillator.stop(now + 0.1);
+            }
+
+            playEcho(objectPosition, playerPosition, distance, maxDistance) {
+                if (!this.initialized) return;
+
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                // Delay based on distance (speed of sound simulation)
+                const delay = (distance / maxDistance) * 0.3;
+
+                // Create spatial panner
+                const panner = ctx.createPanner();
+                panner.panningModel = 'HRTF';
+                panner.distanceModel = 'inverse';
+                panner.refDistance = 1;
+                panner.maxDistance = maxDistance;
+                panner.rolloffFactor = 1;
+                panner.coneInnerAngle = 360;
+                panner.coneOuterAngle = 360;
+                panner.coneOuterGain = 0;
+
+                panner.positionX.setValueAtTime(objectPosition.x, now);
+                panner.positionY.setValueAtTime(objectPosition.y, now);
+                panner.positionZ.setValueAtTime(objectPosition.z, now);
+
+                // Echo sound (higher frequency for closer objects)
+                const oscillator = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+
+                const freqRange = 1 - (distance / maxDistance);
+                const frequency = 800 + freqRange * 1200;
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(frequency, now + delay);
+                oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.5, now + delay + 0.05);
+
+                const volume = Math.max(0.01, 0.2 * (1 - distance / maxDistance));
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.setValueAtTime(volume, now + delay);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.08);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(panner);
+                panner.connect(ctx.destination);
+
+                oscillator.start(now + delay);
+                oscillator.stop(now + delay + 0.1);
+            }
+        }
+
+        // ============================================
+        // CUSTOM SHADER - Echolocation Visibility
+        // ============================================
+        const echolocationVertexShader = `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `;
+
+        const echolocationFragmentShader = `
+            uniform vec3 pulseOrigins[10];
+            uniform float pulseRadii[10];
+            uniform float pulseIntensities[10];
+            uniform int activePulses;
+            uniform float maxPulseRadius;
+            uniform float time;
+
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+
+            void main() {
+                float totalVisibility = 0.0;
+                vec3 finalColor = vec3(0.0);
+
+                for (int i = 0; i < 10; i++) {
+                    if (i >= activePulses) break;
+
+                    float dist = distance(vWorldPosition, pulseOrigins[i]);
+                    float pulseRadius = pulseRadii[i];
+                    float intensity = pulseIntensities[i];
+
+                    // Wave front detection (objects glow when pulse passes through)
+                    float waveFrontWidth = 3.0;
+                    float waveDist = abs(dist - pulseRadius);
+                    float waveVisibility = smoothstep(waveFrontWidth, 0.0, waveDist) * intensity;
+
+                    // Residual glow (fades after wave passes)
+                    float residualGlow = 0.0;
+                    if (dist < pulseRadius) {
+                        residualGlow = intensity * 0.3 * (1.0 - dist / maxPulseRadius);
+                    }
+
+                    float visibility = max(waveVisibility, residualGlow);
+
+                    // Distance-based color: warm (yellow) = close, cool (blue) = far
+                    float normalizedDist = clamp(dist / maxPulseRadius, 0.0, 1.0);
+                    vec3 warmColor = vec3(1.0, 0.9, 0.3);  // Yellow
+                    vec3 coolColor = vec3(0.1, 0.3, 0.8);  // Deep blue
+                    vec3 color = mix(warmColor, coolColor, normalizedDist);
+
+                    // Edge detection for wireframe effect
+                    float edge = 1.0 - abs(dot(vNormal, normalize(pulseOrigins[i] - vWorldPosition)));
+                    edge = pow(edge, 2.0);
+                    visibility *= (0.5 + edge * 0.5);
+
+                    totalVisibility += visibility;
+                    finalColor += color * visibility;
+                }
+
+                if (totalVisibility < 0.01) {
+                    discard;
+                }
+
+                finalColor /= max(totalVisibility, 1.0);
+
+                // Add subtle scan lines for bat sonar feel
+                float scanLine = sin(vWorldPosition.y * 20.0 + time * 2.0) * 0.1 + 0.9;
+                finalColor *= scanLine;
+
+                gl_FragColor = vec4(finalColor, min(totalVisibility, 1.0));
+            }
+        `;
+
+        // ============================================
+        // MAIN SIMULATION
+        // ============================================
+        class EcholocationSimulation {
+            constructor() {
+                this.container = document.getElementById('container');
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.controls = null;
+                this.audio = new EcholocationAudio();
+
+                this.clock = new THREE.Clock();
+                this.moveSpeed = 15;
+                this.velocity = new THREE.Vector3();
+                this.direction = new THREE.Vector3();
+
+                this.moveForward = false;
+                this.moveBackward = false;
+                this.moveLeft = false;
+                this.moveRight = false;
+                this.moveUp = false;
+                this.moveDown = false;
+
+                this.pulses = [];
+                this.maxPulses = 10;
+                this.maxPulseRadius = 80;
+                this.pulseSpeed = 40;
+                this.pulseCount = 0;
+
+                this.echoObjects = [];
+                this.echoMaterial = null;
+
+                this.init();
+            }
+
+            init() {
+                // Renderer setup
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.setClearColor(0x000000);
+                this.container.appendChild(this.renderer.domElement);
+
+                // Camera position (start in the cave)
+                this.camera.position.set(0, 5, 0);
+
+                // Controls
+                this.controls = new PointerLockControls(this.camera, document.body);
+
+                // Create echo material
+                this.createEchoMaterial();
+
+                // Create environment
+                this.createCaveEnvironment();
+
+                // Event listeners
+                this.setupEventListeners();
+
+                // Start render loop
+                this.animate();
+            }
+
+            createEchoMaterial() {
+                this.echoMaterial = new THREE.ShaderMaterial({
+                    vertexShader: echolocationVertexShader,
+                    fragmentShader: echolocationFragmentShader,
+                    uniforms: {
+                        pulseOrigins: { value: new Array(10).fill(new THREE.Vector3()) },
+                        pulseRadii: { value: new Array(10).fill(0) },
+                        pulseIntensities: { value: new Array(10).fill(0) },
+                        activePulses: { value: 0 },
+                        maxPulseRadius: { value: this.maxPulseRadius },
+                        time: { value: 0 }
+                    },
+                    transparent: true,
+                    side: THREE.DoubleSide,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+            }
+
+            createCaveEnvironment() {
+                // Cave walls (large box surrounding the player)
+                const caveSize = 100;
+                const wallGeometry = new THREE.BoxGeometry(caveSize, caveSize * 0.6, caveSize);
+                const caveMesh = new THREE.Mesh(wallGeometry, this.echoMaterial.clone());
+                caveMesh.geometry.deleteAttribute('uv');
+                // Invert normals for interior view
+                caveMesh.geometry.computeVertexNormals();
+                const positions = caveMesh.geometry.attributes.position.array;
+                const normals = caveMesh.geometry.attributes.normal.array;
+                for (let i = 0; i < normals.length; i++) {
+                    normals[i] *= -1;
+                }
+                caveMesh.geometry.attributes.normal.needsUpdate = true;
+                caveMesh.position.set(0, 25, 0);
+                this.scene.add(caveMesh);
+                this.echoObjects.push(caveMesh);
+
+                // Stalactites (hanging from ceiling)
+                for (let i = 0; i < 30; i++) {
+                    const height = 3 + Math.random() * 8;
+                    const radius = 0.3 + Math.random() * 0.7;
+                    const geometry = new THREE.ConeGeometry(radius, height, 6);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 80,
+                        55 - height / 2,
+                        (Math.random() - 0.5) * 80
+                    );
+                    mesh.rotation.x = Math.PI;
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                }
+
+                // Stalagmites (rising from floor)
+                for (let i = 0; i < 25; i++) {
+                    const height = 2 + Math.random() * 6;
+                    const radius = 0.4 + Math.random() * 0.8;
+                    const geometry = new THREE.ConeGeometry(radius, height, 6);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 80,
+                        -5 + height / 2,
+                        (Math.random() - 0.5) * 80
+                    );
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                }
+
+                // Rock formations (scattered spheres and boxes)
+                for (let i = 0; i < 20; i++) {
+                    const size = 1 + Math.random() * 3;
+                    const geometry = Math.random() > 0.5
+                        ? new THREE.SphereGeometry(size, 8, 6)
+                        : new THREE.BoxGeometry(size, size * 0.7, size);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 70,
+                        -5 + size * 0.5 + Math.random() * 3,
+                        (Math.random() - 0.5) * 70
+                    );
+                    mesh.rotation.set(
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI
+                    );
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                }
+
+                // Columns
+                for (let i = 0; i < 8; i++) {
+                    const radius = 1 + Math.random() * 1.5;
+                    const height = 40 + Math.random() * 15;
+                    const geometry = new THREE.CylinderGeometry(radius, radius * 1.3, height, 8);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    const angle = (i / 8) * Math.PI * 2;
+                    const distance = 25 + Math.random() * 10;
+                    mesh.position.set(
+                        Math.cos(angle) * distance,
+                        height / 2 - 5,
+                        Math.sin(angle) * distance
+                    );
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                }
+
+                // Flying insects/moths (small spheres that move)
+                for (let i = 0; i < 15; i++) {
+                    const geometry = new THREE.SphereGeometry(0.15, 4, 4);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 60,
+                        5 + Math.random() * 30,
+                        (Math.random() - 0.5) * 60
+                    );
+                    mesh.userData.isInsect = true;
+                    mesh.userData.baseY = mesh.position.y;
+                    mesh.userData.phase = Math.random() * Math.PI * 2;
+                    mesh.userData.speed = 0.5 + Math.random() * 1.5;
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                }
+            }
+
+            emitPulse() {
+                const origin = this.camera.position.clone();
+
+                this.pulses.push({
+                    origin: origin,
+                    radius: 0,
+                    intensity: 1,
+                    echoedObjects: new Set()
+                });
+
+                // Limit number of active pulses
+                if (this.pulses.length > this.maxPulses) {
+                    this.pulses.shift();
+                }
+
+                // Play chirp sound
+                this.audio.emitChirp();
+
+                this.pulseCount++;
+                document.getElementById('pulseCount').textContent = this.pulseCount;
+            }
+
+            updatePulses(delta) {
+                const time = this.clock.getElapsedTime();
+
+                // Update shader uniforms for all echo objects
+                const origins = [];
+                const radii = [];
+                const intensities = [];
+
+                for (let i = 0; i < this.maxPulses; i++) {
+                    if (i < this.pulses.length) {
+                        const pulse = this.pulses[i];
+                        pulse.radius += this.pulseSpeed * delta;
+                        pulse.intensity = Math.max(0, 1 - pulse.radius / this.maxPulseRadius);
+
+                        origins.push(pulse.origin);
+                        radii.push(pulse.radius);
+                        intensities.push(pulse.intensity);
+
+                        // Check for echoes from objects
+                        for (const obj of this.echoObjects) {
+                            if (!pulse.echoedObjects.has(obj)) {
+                                const dist = pulse.origin.distanceTo(obj.position);
+                                if (Math.abs(dist - pulse.radius) < 3) {
+                                    pulse.echoedObjects.add(obj);
+                                    this.audio.playEcho(
+                                        obj.position,
+                                        this.camera.position,
+                                        dist,
+                                        this.maxPulseRadius
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        origins.push(new THREE.Vector3());
+                        radii.push(0);
+                        intensities.push(0);
+                    }
+                }
+
+                // Remove expired pulses
+                this.pulses = this.pulses.filter(p => p.radius < this.maxPulseRadius);
+
+                // Update all echo object materials
+                for (const obj of this.echoObjects) {
+                    if (obj.material.uniforms) {
+                        obj.material.uniforms.pulseOrigins.value = origins;
+                        obj.material.uniforms.pulseRadii.value = radii;
+                        obj.material.uniforms.pulseIntensities.value = intensities;
+                        obj.material.uniforms.activePulses.value = Math.min(this.pulses.length, this.maxPulses);
+                        obj.material.uniforms.time.value = time;
+                    }
+                }
+            }
+
+            updateInsects(delta) {
+                const time = this.clock.getElapsedTime();
+
+                for (const obj of this.echoObjects) {
+                    if (obj.userData.isInsect) {
+                        // Erratic flying motion
+                        obj.position.y = obj.userData.baseY + Math.sin(time * obj.userData.speed + obj.userData.phase) * 2;
+                        obj.position.x += Math.sin(time * obj.userData.speed * 0.7 + obj.userData.phase) * delta * 2;
+                        obj.position.z += Math.cos(time * obj.userData.speed * 0.5 + obj.userData.phase) * delta * 2;
+
+                        // Keep within bounds
+                        obj.position.x = THREE.MathUtils.clamp(obj.position.x, -40, 40);
+                        obj.position.z = THREE.MathUtils.clamp(obj.position.z, -40, 40);
+                    }
+                }
+            }
+
+            updateMovement(delta) {
+                if (!this.controls.isLocked) return;
+
+                const damping = 5;
+                this.velocity.x -= this.velocity.x * damping * delta;
+                this.velocity.y -= this.velocity.y * damping * delta;
+                this.velocity.z -= this.velocity.z * damping * delta;
+
+                this.direction.z = Number(this.moveForward) - Number(this.moveBackward);
+                this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
+                this.direction.y = Number(this.moveUp) - Number(this.moveDown);
+                this.direction.normalize();
+
+                if (this.moveForward || this.moveBackward) {
+                    this.velocity.z -= this.direction.z * this.moveSpeed * delta;
+                }
+                if (this.moveLeft || this.moveRight) {
+                    this.velocity.x -= this.direction.x * this.moveSpeed * delta;
+                }
+                if (this.moveUp || this.moveDown) {
+                    this.velocity.y += this.direction.y * this.moveSpeed * delta;
+                }
+
+                this.controls.moveRight(-this.velocity.x);
+                this.controls.moveForward(-this.velocity.z);
+                this.camera.position.y += this.velocity.y;
+
+                // Clamp position within cave
+                this.camera.position.x = THREE.MathUtils.clamp(this.camera.position.x, -45, 45);
+                this.camera.position.y = THREE.MathUtils.clamp(this.camera.position.y, -2, 50);
+                this.camera.position.z = THREE.MathUtils.clamp(this.camera.position.z, -45, 45);
+
+                // Update HUD
+                document.getElementById('altitude').textContent = Math.round(this.camera.position.y + 5);
+
+                // Update audio listener position
+                const forward = new THREE.Vector3();
+                const up = new THREE.Vector3(0, 1, 0);
+                this.camera.getWorldDirection(forward);
+                this.audio.updateListenerPosition(this.camera.position, forward, up);
+            }
+
+            setupEventListeners() {
+                // Start button
+                document.getElementById('startBtn').addEventListener('click', () => {
+                    this.audio.init();
+                    this.controls.lock();
+                });
+
+                // Pointer lock events
+                this.controls.addEventListener('lock', () => {
+                    document.getElementById('instructions').classList.add('hidden');
+                    document.getElementById('hud').classList.remove('hidden');
+                    document.getElementById('crosshair').classList.remove('hidden');
+                });
+
+                this.controls.addEventListener('unlock', () => {
+                    document.getElementById('instructions').classList.remove('hidden');
+                    document.getElementById('hud').classList.add('hidden');
+                    document.getElementById('crosshair').classList.add('hidden');
+                });
+
+                // Keyboard controls
+                document.addEventListener('keydown', (e) => {
+                    switch (e.code) {
+                        case 'KeyW': this.moveForward = true; break;
+                        case 'KeyS': this.moveBackward = true; break;
+                        case 'KeyA': this.moveLeft = true; break;
+                        case 'KeyD': this.moveRight = true; break;
+                        case 'Space': this.moveUp = true; e.preventDefault(); break;
+                        case 'ShiftLeft':
+                        case 'ShiftRight': this.moveDown = true; break;
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    switch (e.code) {
+                        case 'KeyW': this.moveForward = false; break;
+                        case 'KeyS': this.moveBackward = false; break;
+                        case 'KeyA': this.moveLeft = false; break;
+                        case 'KeyD': this.moveRight = false; break;
+                        case 'Space': this.moveUp = false; break;
+                        case 'ShiftLeft':
+                        case 'ShiftRight': this.moveDown = false; break;
+                    }
+                });
+
+                // Mouse click to emit pulse
+                document.addEventListener('click', () => {
+                    if (this.controls.isLocked) {
+                        this.emitPulse();
+                    }
+                });
+
+                // Window resize
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const delta = Math.min(this.clock.getDelta(), 0.1);
+
+                this.updateMovement(delta);
+                this.updatePulses(delta);
+                this.updateInsects(delta);
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Start simulation
+        const simulation = new EcholocationSimulation();
+    </script>
+</body>
+</html>
