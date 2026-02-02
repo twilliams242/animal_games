@@ -88,6 +88,78 @@
         .hidden {
             display: none !important;
         }
+        #hungerContainer {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        #hungerLabel {
+            color: #ff9944;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        #hungerBar {
+            width: 150px;
+            height: 12px;
+            background: rgba(50, 50, 50, 0.8);
+            border: 1px solid #666;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        #hungerFill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #ff4444, #ff9944, #44ff44);
+            background-size: 300% 100%;
+            background-position: 100% 0;
+            transition: width 0.3s ease, background-position 0.3s ease;
+        }
+        #locationIndicator {
+            position: fixed;
+            top: 50px;
+            left: 20px;
+            color: #4a9eff;
+            font-size: 12px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        #gameOver {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff4444;
+            text-align: center;
+            padding: 40px;
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid #ff4444;
+            border-radius: 10px;
+            z-index: 200;
+        }
+        #gameOver h1 {
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+        #gameOver p {
+            color: #aaa;
+            margin: 10px 0;
+        }
+        #gameOver button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            font-size: 16px;
+            background: #ff4444;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        #gameOver button:hover {
+            background: #ff6666;
+        }
     </style>
 </head>
 <body>
@@ -95,24 +167,45 @@
 
     <div id="instructions">
         <h1>🦇 The Echolocating Bat</h1>
-        <p>Experience the world through biological sonar.</p>
+        <p>Experience the world through biological sonar. Hunt insects to survive!</p>
         <p>
             <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> - Fly around<br>
             <span class="key">SPACE</span> - Ascend | <span class="key">SHIFT</span> - Descend<br>
             <span class="key">MOUSE</span> - Look around<br>
-            <span class="key">CLICK</span> - Emit sonar pulse
+            <span class="key">CLICK</span> - Emit sonar pulse<br>
+            <span class="key">E</span> - Eat nearby insects
         </p>
-        <p style="color: #ffcc00; margin-top: 15px;">
-            Close objects glow warm (yellow)<br>
-            Far objects appear cool (blue)
+        <p style="color: #ff9944; margin-top: 15px;">
+            Your hunger slowly depletes - catch insects to survive!<br>
+            Fly to the cave entrance to explore the open plains.
+        </p>
+        <p style="color: #ffcc00; margin-top: 10px;">
+            Close objects glow warm (yellow) | Far objects appear cool (blue)
         </p>
         <button id="startBtn">Enter the Cave</button>
     </div>
 
+    <div id="gameOver" class="hidden">
+        <h1>💀 Starved!</h1>
+        <p>Your bat succumbed to hunger...</p>
+        <p id="finalStats"></p>
+        <button id="restartBtn">Try Again</button>
+    </div>
+
+    <div id="hungerContainer" class="hidden">
+        <div id="hungerLabel">Hunger</div>
+        <div id="hungerBar">
+            <div id="hungerFill"></div>
+        </div>
+    </div>
+
+    <div id="locationIndicator" class="hidden">📍 Inside Cave</div>
+
     <div id="hud" class="hidden">
         <div>Altitude: <span id="altitude">0</span>m</div>
         <div>Pulses: <span id="pulseCount">0</span></div>
-        <div style="margin-top: 10px; color: #666;">Click to echolocate</div>
+        <div>Insects eaten: <span id="insectsEaten">0</span></div>
+        <div style="margin-top: 10px; color: #666;">Click to echolocate | E to eat</div>
     </div>
 
     <div id="crosshair" class="hidden"></div>
@@ -352,6 +445,22 @@
                 this.echoObjects = [];
                 this.echoMaterial = null;
 
+                // Hunger system
+                this.hunger = 100;
+                this.maxHunger = 100;
+                this.hungerDepleteRate = 2; // Per second
+                this.insectsEaten = 0;
+                this.hungerPerInsect = 25;
+
+                // Location system
+                this.currentLocation = 'cave'; // 'cave' or 'plains'
+                this.caveEntrance = new THREE.Vector3(48, 5, 0); // Exit point
+                this.plainsEntrance = new THREE.Vector3(-148, 5, 0); // Entry point back to cave
+
+                // Game state
+                this.gameOver = false;
+                this.insects = []; // Track insects separately for eating
+
                 this.init();
             }
 
@@ -371,8 +480,9 @@
                 // Create echo material
                 this.createEchoMaterial();
 
-                // Create environment
+                // Create environments
                 this.createCaveEnvironment();
+                this.createPlainsEnvironment();
 
                 // Event listeners
                 this.setupEventListeners();
@@ -500,9 +610,117 @@
                     mesh.userData.baseY = mesh.position.y;
                     mesh.userData.phase = Math.random() * Math.PI * 2;
                     mesh.userData.speed = 0.5 + Math.random() * 1.5;
+                    mesh.userData.location = 'cave';
+                    mesh.userData.eaten = false;
                     this.scene.add(mesh);
                     this.echoObjects.push(mesh);
+                    this.insects.push(mesh);
                 }
+
+                // Cave entrance/exit (glowing arch on the east side)
+                const entranceGroup = new THREE.Group();
+
+                // Entrance arch
+                const archGeometry = new THREE.TorusGeometry(8, 1.5, 8, 16, Math.PI);
+                const archMesh = new THREE.Mesh(archGeometry, this.echoMaterial.clone());
+                archMesh.rotation.x = Math.PI / 2;
+                archMesh.rotation.z = Math.PI / 2;
+                archMesh.position.set(48, 8, 0);
+                this.scene.add(archMesh);
+                this.echoObjects.push(archMesh);
+
+                // Entrance pillars
+                for (let side = -1; side <= 1; side += 2) {
+                    const pillarGeometry = new THREE.CylinderGeometry(1.5, 1.5, 16, 8);
+                    const pillarMesh = new THREE.Mesh(pillarGeometry, this.echoMaterial.clone());
+                    pillarMesh.position.set(48, 3, side * 8);
+                    this.scene.add(pillarMesh);
+                    this.echoObjects.push(pillarMesh);
+                }
+            }
+
+            createPlainsEnvironment() {
+                // Open plains ground (large flat area)
+                const groundGeometry = new THREE.PlaneGeometry(400, 400, 20, 20);
+                const groundMesh = new THREE.Mesh(groundGeometry, this.echoMaterial.clone());
+                groundMesh.rotation.x = -Math.PI / 2;
+                groundMesh.position.set(250, -5, 0);
+                this.scene.add(groundMesh);
+                this.echoObjects.push(groundMesh);
+
+                // Scattered trees/bushes on the plains
+                for (let i = 0; i < 40; i++) {
+                    // Tree trunk
+                    const trunkHeight = 8 + Math.random() * 12;
+                    const trunkRadius = 0.5 + Math.random() * 0.5;
+                    const trunkGeometry = new THREE.CylinderGeometry(trunkRadius, trunkRadius * 1.2, trunkHeight, 6);
+                    const trunkMesh = new THREE.Mesh(trunkGeometry, this.echoMaterial.clone());
+                    const treeX = 100 + Math.random() * 300;
+                    const treeZ = (Math.random() - 0.5) * 350;
+                    trunkMesh.position.set(treeX, trunkHeight / 2 - 5, treeZ);
+                    this.scene.add(trunkMesh);
+                    this.echoObjects.push(trunkMesh);
+
+                    // Tree canopy (sphere or cone)
+                    const canopySize = 3 + Math.random() * 4;
+                    const canopyGeometry = Math.random() > 0.5
+                        ? new THREE.SphereGeometry(canopySize, 6, 6)
+                        : new THREE.ConeGeometry(canopySize, canopySize * 1.5, 6);
+                    const canopyMesh = new THREE.Mesh(canopyGeometry, this.echoMaterial.clone());
+                    canopyMesh.position.set(treeX, trunkHeight - 2, treeZ);
+                    this.scene.add(canopyMesh);
+                    this.echoObjects.push(canopyMesh);
+                }
+
+                // Rocks scattered on plains
+                for (let i = 0; i < 25; i++) {
+                    const size = 1 + Math.random() * 2;
+                    const rockGeometry = new THREE.DodecahedronGeometry(size, 0);
+                    const rockMesh = new THREE.Mesh(rockGeometry, this.echoMaterial.clone());
+                    rockMesh.position.set(
+                        80 + Math.random() * 320,
+                        -5 + size * 0.5,
+                        (Math.random() - 0.5) * 350
+                    );
+                    rockMesh.rotation.set(
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI
+                    );
+                    this.scene.add(rockMesh);
+                    this.echoObjects.push(rockMesh);
+                }
+
+                // Plains insects (more plentiful outside)
+                for (let i = 0; i < 30; i++) {
+                    const geometry = new THREE.SphereGeometry(0.2, 4, 4);
+                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
+                    mesh.position.set(
+                        80 + Math.random() * 320,
+                        Math.random() * 25,
+                        (Math.random() - 0.5) * 350
+                    );
+                    mesh.userData.isInsect = true;
+                    mesh.userData.baseY = mesh.position.y;
+                    mesh.userData.phase = Math.random() * Math.PI * 2;
+                    mesh.userData.speed = 0.5 + Math.random() * 2;
+                    mesh.userData.location = 'plains';
+                    mesh.userData.eaten = false;
+                    mesh.userData.baseX = mesh.position.x;
+                    mesh.userData.baseZ = mesh.position.z;
+                    this.scene.add(mesh);
+                    this.echoObjects.push(mesh);
+                    this.insects.push(mesh);
+                }
+
+                // Entry arch back to cave
+                const entryArchGeometry = new THREE.TorusGeometry(8, 1.5, 8, 16, Math.PI);
+                const entryArchMesh = new THREE.Mesh(entryArchGeometry, this.echoMaterial.clone());
+                entryArchMesh.rotation.x = Math.PI / 2;
+                entryArchMesh.rotation.z = -Math.PI / 2;
+                entryArchMesh.position.set(52, 8, 0);
+                this.scene.add(entryArchMesh);
+                this.echoObjects.push(entryArchMesh);
             }
 
             emitPulse() {
@@ -585,22 +803,29 @@
             updateInsects(delta) {
                 const time = this.clock.getElapsedTime();
 
-                for (const obj of this.echoObjects) {
-                    if (obj.userData.isInsect) {
-                        // Erratic flying motion
-                        obj.position.y = obj.userData.baseY + Math.sin(time * obj.userData.speed + obj.userData.phase) * 2;
-                        obj.position.x += Math.sin(time * obj.userData.speed * 0.7 + obj.userData.phase) * delta * 2;
-                        obj.position.z += Math.cos(time * obj.userData.speed * 0.5 + obj.userData.phase) * delta * 2;
+                for (const insect of this.insects) {
+                    // Skip eaten insects
+                    if (insect.userData.eaten) continue;
 
-                        // Keep within bounds
-                        obj.position.x = THREE.MathUtils.clamp(obj.position.x, -40, 40);
-                        obj.position.z = THREE.MathUtils.clamp(obj.position.z, -40, 40);
+                    // Erratic flying motion
+                    insect.position.y = insect.userData.baseY + Math.sin(time * insect.userData.speed + insect.userData.phase) * 2;
+                    insect.position.x += Math.sin(time * insect.userData.speed * 0.7 + insect.userData.phase) * delta * 2;
+                    insect.position.z += Math.cos(time * insect.userData.speed * 0.5 + insect.userData.phase) * delta * 2;
+
+                    // Keep within location-specific bounds
+                    if (insect.userData.location === 'cave') {
+                        insect.position.x = THREE.MathUtils.clamp(insect.position.x, -40, 40);
+                        insect.position.z = THREE.MathUtils.clamp(insect.position.z, -40, 40);
+                    } else {
+                        // Plains insects have wider range
+                        insect.position.x = THREE.MathUtils.clamp(insect.position.x, 80, 400);
+                        insect.position.z = THREE.MathUtils.clamp(insect.position.z, -170, 170);
                     }
                 }
             }
 
             updateMovement(delta) {
-                if (!this.controls.isLocked) return;
+                if (!this.controls.isLocked || this.gameOver) return;
 
                 const damping = 5;
                 this.velocity.x -= this.velocity.x * damping * delta;
@@ -626,19 +851,184 @@
                 this.controls.moveForward(-this.velocity.z);
                 this.camera.position.y += this.velocity.y;
 
-                // Clamp position within cave
-                this.camera.position.x = THREE.MathUtils.clamp(this.camera.position.x, -45, 45);
-                this.camera.position.y = THREE.MathUtils.clamp(this.camera.position.y, -2, 50);
-                this.camera.position.z = THREE.MathUtils.clamp(this.camera.position.z, -45, 45);
+                // Handle location transitions and bounds
+                const pos = this.camera.position;
+
+                if (this.currentLocation === 'cave') {
+                    // In cave - check for exit to plains
+                    if (pos.x > 50 && Math.abs(pos.z) < 10 && pos.y < 20) {
+                        // Transition to plains
+                        this.currentLocation = 'plains';
+                        pos.x = 55;
+                        document.getElementById('locationIndicator').textContent = '📍 Open Plains';
+                    } else {
+                        // Clamp within cave bounds
+                        pos.x = THREE.MathUtils.clamp(pos.x, -45, 50);
+                        pos.z = THREE.MathUtils.clamp(pos.z, -45, 45);
+                    }
+                } else {
+                    // In plains - check for return to cave
+                    if (pos.x < 50 && Math.abs(pos.z) < 10 && pos.y < 20) {
+                        // Transition back to cave
+                        this.currentLocation = 'cave';
+                        pos.x = 45;
+                        document.getElementById('locationIndicator').textContent = '📍 Inside Cave';
+                    } else {
+                        // Clamp within plains bounds
+                        pos.x = THREE.MathUtils.clamp(pos.x, 50, 450);
+                        pos.z = THREE.MathUtils.clamp(pos.z, -180, 180);
+                    }
+                }
+
+                // Vertical bounds (same for both areas)
+                pos.y = THREE.MathUtils.clamp(pos.y, -2, 50);
 
                 // Update HUD
-                document.getElementById('altitude').textContent = Math.round(this.camera.position.y + 5);
+                document.getElementById('altitude').textContent = Math.round(pos.y + 5);
 
                 // Update audio listener position
                 const forward = new THREE.Vector3();
                 const up = new THREE.Vector3(0, 1, 0);
                 this.camera.getWorldDirection(forward);
-                this.audio.updateListenerPosition(this.camera.position, forward, up);
+                this.audio.updateListenerPosition(pos, forward, up);
+            }
+
+            updateHunger(delta) {
+                if (this.gameOver) return;
+
+                // Deplete hunger over time
+                this.hunger -= this.hungerDepleteRate * delta;
+                this.hunger = Math.max(0, this.hunger);
+
+                // Update hunger bar UI
+                const hungerPercent = (this.hunger / this.maxHunger) * 100;
+                const hungerFill = document.getElementById('hungerFill');
+                hungerFill.style.width = hungerPercent + '%';
+
+                // Color transitions: green (100%) -> yellow (50%) -> red (0%)
+                const bgPosition = 100 - hungerPercent;
+                hungerFill.style.backgroundPosition = bgPosition + '% 0';
+
+                // Check for starvation
+                if (this.hunger <= 0) {
+                    this.triggerGameOver();
+                }
+            }
+
+            tryEatInsect() {
+                if (this.gameOver) return;
+
+                const eatRange = 3; // How close you need to be to eat an insect
+                const playerPos = this.camera.position;
+
+                for (const insect of this.insects) {
+                    if (insect.userData.eaten) continue;
+
+                    const distance = playerPos.distanceTo(insect.position);
+                    if (distance < eatRange) {
+                        // Eat the insect!
+                        insect.userData.eaten = true;
+                        insect.visible = false;
+
+                        // Restore hunger
+                        this.hunger = Math.min(this.maxHunger, this.hunger + this.hungerPerInsect);
+                        this.insectsEaten++;
+                        document.getElementById('insectsEaten').textContent = this.insectsEaten;
+
+                        // Play eating sound
+                        this.playEatSound();
+
+                        // Respawn insect after delay
+                        setTimeout(() => this.respawnInsect(insect), 5000 + Math.random() * 10000);
+
+                        return; // Only eat one insect at a time
+                    }
+                }
+            }
+
+            playEatSound() {
+                if (!this.audio.initialized) return;
+
+                const ctx = this.audio.audioContext;
+                const now = ctx.currentTime;
+
+                // Satisfying crunch/chomp sound
+                const oscillator = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(200, now);
+                oscillator.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(ctx.destination);
+
+                oscillator.start(now);
+                oscillator.stop(now + 0.15);
+            }
+
+            respawnInsect(insect) {
+                if (this.gameOver) return;
+
+                // Respawn in a random location appropriate to its area
+                if (insect.userData.location === 'cave') {
+                    insect.position.set(
+                        (Math.random() - 0.5) * 60,
+                        5 + Math.random() * 30,
+                        (Math.random() - 0.5) * 60
+                    );
+                } else {
+                    insect.position.set(
+                        80 + Math.random() * 320,
+                        Math.random() * 25,
+                        (Math.random() - 0.5) * 350
+                    );
+                }
+                insect.userData.baseY = insect.position.y;
+                insect.userData.eaten = false;
+                insect.visible = true;
+            }
+
+            triggerGameOver() {
+                this.gameOver = true;
+                this.controls.unlock();
+
+                // Show game over screen
+                document.getElementById('finalStats').textContent =
+                    `Insects eaten: ${this.insectsEaten} | Pulses: ${this.pulseCount}`;
+                document.getElementById('gameOver').classList.remove('hidden');
+                document.getElementById('instructions').classList.add('hidden');
+            }
+
+            restartGame() {
+                // Reset game state
+                this.hunger = this.maxHunger;
+                this.insectsEaten = 0;
+                this.pulseCount = 0;
+                this.gameOver = false;
+                this.currentLocation = 'cave';
+
+                // Reset camera position
+                this.camera.position.set(0, 5, 0);
+
+                // Respawn all insects
+                for (const insect of this.insects) {
+                    this.respawnInsect(insect);
+                }
+
+                // Reset UI
+                document.getElementById('hungerFill').style.width = '100%';
+                document.getElementById('hungerFill').style.backgroundPosition = '0% 0';
+                document.getElementById('insectsEaten').textContent = '0';
+                document.getElementById('pulseCount').textContent = '0';
+                document.getElementById('locationIndicator').textContent = '📍 Inside Cave';
+                document.getElementById('gameOver').classList.add('hidden');
+
+                // Re-lock controls
+                this.controls.lock();
             }
 
             setupEventListeners() {
@@ -648,17 +1038,28 @@
                     this.controls.lock();
                 });
 
+                // Restart button
+                document.getElementById('restartBtn').addEventListener('click', () => {
+                    this.restartGame();
+                });
+
                 // Pointer lock events
                 this.controls.addEventListener('lock', () => {
                     document.getElementById('instructions').classList.add('hidden');
                     document.getElementById('hud').classList.remove('hidden');
                     document.getElementById('crosshair').classList.remove('hidden');
+                    document.getElementById('hungerContainer').classList.remove('hidden');
+                    document.getElementById('locationIndicator').classList.remove('hidden');
                 });
 
                 this.controls.addEventListener('unlock', () => {
-                    document.getElementById('instructions').classList.remove('hidden');
+                    if (!this.gameOver) {
+                        document.getElementById('instructions').classList.remove('hidden');
+                    }
                     document.getElementById('hud').classList.add('hidden');
                     document.getElementById('crosshair').classList.add('hidden');
+                    document.getElementById('hungerContainer').classList.add('hidden');
+                    document.getElementById('locationIndicator').classList.add('hidden');
                 });
 
                 // Keyboard controls
@@ -671,6 +1072,7 @@
                         case 'Space': this.moveUp = true; e.preventDefault(); break;
                         case 'ShiftLeft':
                         case 'ShiftRight': this.moveDown = true; break;
+                        case 'KeyE': this.tryEatInsect(); break;
                     }
                 });
 
@@ -688,7 +1090,7 @@
 
                 // Mouse click to emit pulse
                 document.addEventListener('click', () => {
-                    if (this.controls.isLocked) {
+                    if (this.controls.isLocked && !this.gameOver) {
                         this.emitPulse();
                     }
                 });
@@ -709,6 +1111,11 @@
                 this.updateMovement(delta);
                 this.updatePulses(delta);
                 this.updateInsects(delta);
+
+                // Update hunger when game is active
+                if (this.controls.isLocked && !this.gameOver) {
+                    this.updateHunger(delta);
+                }
 
                 this.renderer.render(this.scene, this.camera);
             }
