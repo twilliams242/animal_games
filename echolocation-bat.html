@@ -170,9 +170,9 @@
         <p>Experience the world through biological sonar. Hunt insects to survive!</p>
         <p>
             <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> - Fly around<br>
-            <span class="key">SPACE</span> - Ascend | <span class="key">SHIFT</span> - Descend<br>
+            <span class="key">↑</span> - Ascend | <span class="key">↓</span> - Descend<br>
             <span class="key">MOUSE</span> - Look around<br>
-            <span class="key">CLICK</span> - Emit sonar pulse<br>
+            <span class="key">SPACE</span> - Emit sonar pulse<br>
             <span class="key">E</span> - Eat nearby insects
         </p>
         <p style="color: #ff9944; margin-top: 15px;">
@@ -205,7 +205,7 @@
         <div>Altitude: <span id="altitude">0</span>m</div>
         <div>Pulses: <span id="pulseCount">0</span></div>
         <div>Insects eaten: <span id="insectsEaten">0</span></div>
-        <div style="margin-top: 10px; color: #666;">Click to echolocate | E to eat</div>
+        <div style="margin-top: 10px; color: #666;">SPACE to echolocate | E to eat</div>
     </div>
 
     <div id="crosshair" class="hidden"></div>
@@ -1069,9 +1069,14 @@
                         case 'KeyS': this.moveBackward = true; break;
                         case 'KeyA': this.moveLeft = true; break;
                         case 'KeyD': this.moveRight = true; break;
-                        case 'Space': this.moveUp = true; e.preventDefault(); break;
-                        case 'ShiftLeft':
-                        case 'ShiftRight': this.moveDown = true; break;
+                        case 'ArrowUp': this.moveUp = true; e.preventDefault(); break;
+                        case 'ArrowDown': this.moveDown = true; e.preventDefault(); break;
+                        case 'Space':
+                            if (this.controls.isLocked && !this.gameOver) {
+                                this.emitPulse();
+                            }
+                            e.preventDefault();
+                            break;
                         case 'KeyE': this.tryEatInsect(); break;
                     }
                 });
@@ -1082,13 +1087,12 @@
                         case 'KeyS': this.moveBackward = false; break;
                         case 'KeyA': this.moveLeft = false; break;
                         case 'KeyD': this.moveRight = false; break;
-                        case 'Space': this.moveUp = false; break;
-                        case 'ShiftLeft':
-                        case 'ShiftRight': this.moveDown = false; break;
+                        case 'ArrowUp': this.moveUp = false; break;
+                        case 'ArrowDown': this.moveDown = false; break;
                     }
                 });
 
-                // Mouse click to emit pulse
+                // Mouse click also emits pulse (alternative control)
                 document.addEventListener('click', () => {
                     if (this.controls.isLocked && !this.gameOver) {
                         this.emitPulse();
