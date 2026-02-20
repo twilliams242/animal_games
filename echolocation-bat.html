@@ -160,6 +160,26 @@
         #gameOver button:hover {
             background: #ff6666;
         }
+        #minimapContainer {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        #minimapLabel {
+            color: #4a6a8a;
+            font-size: 10px;
+            text-align: center;
+            margin-bottom: 3px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        #minimap {
+            border: 1px solid rgba(74, 158, 255, 0.3);
+            border-radius: 4px;
+            background: rgba(0, 5, 15, 0.85);
+        }
     </style>
 </head>
 <body>
@@ -209,6 +229,11 @@
     </div>
 
     <div id="crosshair" class="hidden"></div>
+
+    <div id="minimapContainer" class="hidden">
+        <div id="minimapLabel">Spatial Memory</div>
+        <canvas id="minimap" width="150" height="140"></canvas>
+    </div>
 
     <script type="importmap">
     {
@@ -483,6 +508,9 @@
                 // Create environments
                 this.createCaveEnvironment();
                 this.createPlainsEnvironment();
+
+                // Setup minimap
+                this.setupMinimap();
 
                 // Event listeners
                 this.setupEventListeners();
@@ -1026,9 +1054,163 @@
                 document.getElementById('pulseCount').textContent = '0';
                 document.getElementById('locationIndicator').textContent = '📍 Inside Cave';
                 document.getElementById('gameOver').classList.add('hidden');
+                this.revealedObjects.clear();
 
                 // Re-lock controls
                 this.controls.lock();
+            }
+
+            setupMinimap() {
+                this.minimapCanvas = document.getElementById('minimap');
+                this.minimapCtx = this.minimapCanvas.getContext('2d');
+
+                // World coordinate ranges: X: -45 to 450, Z: -180 to 180
+                this.mapBounds = { minX: -50, maxX: 460, minZ: -190, maxZ: 190 };
+                this.mapWidth = this.minimapCanvas.width;
+                this.mapHeight = this.minimapCanvas.height;
+
+                // Track objects revealed by echolocation
+                this.revealedObjects = new Map(); // object -> { x, z, time, type }
+            }
+
+            worldToMap(worldX, worldZ) {
+                const { minX, maxX, minZ, maxZ } = this.mapBounds;
+                const x = ((worldX - minX) / (maxX - minX)) * this.mapWidth;
+                const y = ((worldZ - minZ) / (maxZ - minZ)) * this.mapHeight;
+                return { x, y };
+            }
+
+            updateMinimap() {
+                const ctx = this.minimapCtx;
+                const w = this.mapWidth;
+                const h = this.mapHeight;
+                const now = performance.now() / 1000;
+
+                // Clear
+                ctx.clearRect(0, 0, w, h);
+
+                // Draw cave outline
+                const caveTopLeft = this.worldToMap(-45, -45);
+                const caveBotRight = this.worldToMap(50, 45);
+                ctx.strokeStyle = 'rgba(40, 80, 120, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(caveTopLeft.x, caveTopLeft.y,
+                    caveBotRight.x - caveTopLeft.x, caveBotRight.y - caveTopLeft.y);
+
+                // Fill cave with faint tint
+                ctx.fillStyle = 'rgba(20, 40, 60, 0.3)';
+                ctx.fillRect(caveTopLeft.x, caveTopLeft.y,
+                    caveBotRight.x - caveTopLeft.x, caveBotRight.y - caveTopLeft.y);
+
+                // Draw plains outline
+                const plainsTopLeft = this.worldToMap(50, -180);
+                const plainsBotRight = this.worldToMap(450, 180);
+                ctx.strokeStyle = 'rgba(40, 100, 60, 0.4)';
+                ctx.strokeRect(plainsTopLeft.x, plainsTopLeft.y,
+                    plainsBotRight.x - plainsTopLeft.x, plainsBotRight.y - plainsTopLeft.y);
+
+                ctx.fillStyle = 'rgba(20, 50, 30, 0.2)';
+                ctx.fillRect(plainsTopLeft.x, plainsTopLeft.y,
+                    plainsBotRight.x - plainsTopLeft.x, plainsBotRight.y - plainsTopLeft.y);
+
+                // Draw cave entrance marker
+                const entrance = this.worldToMap(50, 0);
+                ctx.fillStyle = 'rgba(255, 200, 50, 0.6)';
+                ctx.fillRect(entrance.x - 1, entrance.y - 4, 2, 8);
+
+                // Mark revealed objects from echolocation
+                for (const pulse of this.pulses) {
+                    for (const obj of pulse.echoedObjects) {
+                        if (!this.revealedObjects.has(obj) || now - this.revealedObjects.get(obj).time < 0.5) {
+                            let type = 'structure';
+                            if (obj.userData.isInsect && !obj.userData.eaten) type = 'insect';
+                            this.revealedObjects.set(obj, {
+                                x: obj.position.x,
+                                z: obj.position.z,
+                                time: now,
+                                type: type
+                            });
+                        }
+                    }
+                }
+
+                // Draw revealed objects (fade over time)
+                for (const [obj, data] of this.revealedObjects) {
+                    const age = now - data.time;
+                    const fadeTime = 8;
+                    if (age > fadeTime) {
+                        this.revealedObjects.delete(obj);
+                        continue;
+                    }
+
+                    const alpha = Math.max(0, 0.6 * (1 - age / fadeTime));
+                    const pos = this.worldToMap(data.x, data.z);
+
+                    if (data.type === 'insect') {
+                        // Insects show as small green dots
+                        ctx.fillStyle = `rgba(100, 255, 100, ${alpha})`;
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        // Structures show as dim blue dots
+                        ctx.fillStyle = `rgba(74, 130, 200, ${alpha * 0.5})`;
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, 1, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // Draw active pulse rings
+                for (const pulse of this.pulses) {
+                    if (pulse.intensity > 0.05) {
+                        const center = this.worldToMap(pulse.origin.x, pulse.origin.z);
+                        const scaleX = this.mapWidth / (this.mapBounds.maxX - this.mapBounds.minX);
+                        const radius = pulse.radius * scaleX;
+                        ctx.strokeStyle = `rgba(74, 158, 255, ${pulse.intensity * 0.3})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+
+                // Draw bat position
+                const batPos = this.worldToMap(this.camera.position.x, this.camera.position.z);
+
+                // Facing direction line
+                const forward = new THREE.Vector3();
+                this.camera.getWorldDirection(forward);
+                const dirLen = 8;
+                ctx.strokeStyle = 'rgba(255, 255, 200, 0.6)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(batPos.x, batPos.y);
+                ctx.lineTo(batPos.x + forward.x * dirLen, batPos.y + forward.z * dirLen);
+                ctx.stroke();
+
+                // Bat dot (pulsing glow)
+                const glow = 0.7 + Math.sin(now * 3) * 0.3;
+                ctx.fillStyle = `rgba(255, 220, 80, ${glow})`;
+                ctx.beginPath();
+                ctx.arc(batPos.x, batPos.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${glow * 0.8})`;
+                ctx.beginPath();
+                ctx.arc(batPos.x, batPos.y, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Area labels
+                ctx.font = '8px Courier New';
+                ctx.textAlign = 'center';
+                const caveLabelPos = this.worldToMap(0, -35);
+                ctx.fillStyle = 'rgba(74, 130, 200, 0.4)';
+                ctx.fillText('CAVE', caveLabelPos.x, caveLabelPos.y);
+
+                const plainsLabelPos = this.worldToMap(250, -165);
+                ctx.fillStyle = 'rgba(60, 130, 70, 0.4)';
+                ctx.fillText('PLAINS', plainsLabelPos.x, plainsLabelPos.y);
             }
 
             setupEventListeners() {
@@ -1050,6 +1232,7 @@
                     document.getElementById('crosshair').classList.remove('hidden');
                     document.getElementById('hungerContainer').classList.remove('hidden');
                     document.getElementById('locationIndicator').classList.remove('hidden');
+                    document.getElementById('minimapContainer').classList.remove('hidden');
                 });
 
                 this.controls.addEventListener('unlock', () => {
@@ -1060,6 +1243,7 @@
                     document.getElementById('crosshair').classList.add('hidden');
                     document.getElementById('hungerContainer').classList.add('hidden');
                     document.getElementById('locationIndicator').classList.add('hidden');
+                    document.getElementById('minimapContainer').classList.add('hidden');
                 });
 
                 // Keyboard controls
@@ -1119,6 +1303,11 @@
                 // Update hunger when game is active
                 if (this.controls.isLocked && !this.gameOver) {
                     this.updateHunger(delta);
+                }
+
+                // Update minimap
+                if (this.controls.isLocked) {
+                    this.updateMinimap();
                 }
 
                 this.renderer.render(this.scene, this.camera);
