@@ -256,6 +256,11 @@
                 this.audioContext = null;
                 this.listener = null;
                 this.initialized = false;
+
+                // Ambient sound state
+                this.caveAmbientGain = null;
+                this.plainsAmbientGain = null;
+                this.ambientTimers = [];
             }
 
             init() {
@@ -263,6 +268,320 @@
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 this.listener = this.audioContext.listener;
                 this.initialized = true;
+
+                // Setup ambient sound gain nodes
+                this.caveAmbientGain = this.audioContext.createGain();
+                this.caveAmbientGain.gain.value = 1;
+                this.caveAmbientGain.connect(this.audioContext.destination);
+
+                this.plainsAmbientGain = this.audioContext.createGain();
+                this.plainsAmbientGain.gain.value = 0;
+                this.plainsAmbientGain.connect(this.audioContext.destination);
+
+                // Start ambient sound loops
+                this.startCaveAmbience();
+                this.startPlainsAmbience();
+            }
+
+            setLocation(location) {
+                if (!this.initialized) return;
+                const now = this.audioContext.currentTime;
+                const fadeTime = 1.5;
+
+                if (location === 'cave') {
+                    this.caveAmbientGain.gain.linearRampToValueAtTime(1, now + fadeTime);
+                    this.plainsAmbientGain.gain.linearRampToValueAtTime(0, now + fadeTime);
+                } else {
+                    this.caveAmbientGain.gain.linearRampToValueAtTime(0, now + fadeTime);
+                    this.plainsAmbientGain.gain.linearRampToValueAtTime(1, now + fadeTime);
+                }
+            }
+
+            startCaveAmbience() {
+                // Continuous low rumble/drone for cave atmosphere
+                const ctx = this.audioContext;
+                const rumble = ctx.createOscillator();
+                const rumbleGain = ctx.createGain();
+                rumble.type = 'sine';
+                rumble.frequency.value = 45;
+                rumbleGain.gain.value = 0.04;
+                rumble.connect(rumbleGain);
+                rumbleGain.connect(this.caveAmbientGain);
+                rumble.start();
+
+                // Second harmonic for depth
+                const rumble2 = ctx.createOscillator();
+                const rumble2Gain = ctx.createGain();
+                rumble2.type = 'sine';
+                rumble2.frequency.value = 90;
+                rumble2Gain.gain.value = 0.015;
+                rumble2.connect(rumble2Gain);
+                rumble2Gain.connect(this.caveAmbientGain);
+                rumble2.start();
+
+                // Schedule random water drips
+                this.scheduleCaveDrip();
+                // Schedule occasional cave groans/echoes
+                this.scheduleCaveEcho();
+            }
+
+            scheduleCaveDrip() {
+                if (!this.initialized) return;
+                const delay = 800 + Math.random() * 3000;
+                const timer = setTimeout(() => {
+                    this.playCaveDrip();
+                    this.scheduleCaveDrip();
+                }, delay);
+                this.ambientTimers.push(timer);
+            }
+
+            playCaveDrip() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                const filter = ctx.createBiquadFilter();
+
+                // High-pitched drip
+                osc.type = 'sine';
+                const pitch = 2000 + Math.random() * 2000;
+                osc.frequency.setValueAtTime(pitch, now);
+                osc.frequency.exponentialRampToValueAtTime(pitch * 0.4, now + 0.08);
+
+                filter.type = 'bandpass';
+                filter.frequency.value = pitch;
+                filter.Q.value = 10;
+
+                const vol = 0.03 + Math.random() * 0.05;
+                gain.gain.setValueAtTime(vol, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.caveAmbientGain);
+
+                osc.start(now);
+                osc.stop(now + 0.15);
+
+                // Sometimes a second drip follows (echo)
+                if (Math.random() < 0.4) {
+                    const osc2 = ctx.createOscillator();
+                    const gain2 = ctx.createGain();
+                    osc2.type = 'sine';
+                    osc2.frequency.setValueAtTime(pitch * 0.9, now + 0.15);
+                    osc2.frequency.exponentialRampToValueAtTime(pitch * 0.3, now + 0.22);
+                    gain2.gain.setValueAtTime(vol * 0.4, now + 0.15);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc2.connect(gain2);
+                    gain2.connect(this.caveAmbientGain);
+                    osc2.start(now + 0.15);
+                    osc2.stop(now + 0.28);
+                }
+            }
+
+            scheduleCaveEcho() {
+                if (!this.initialized) return;
+                const delay = 4000 + Math.random() * 8000;
+                const timer = setTimeout(() => {
+                    this.playCaveEcho();
+                    this.scheduleCaveEcho();
+                }, delay);
+                this.ambientTimers.push(timer);
+            }
+
+            playCaveEcho() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                // Distant rumbling echo
+                const noise = ctx.createOscillator();
+                const gain = ctx.createGain();
+                const filter = ctx.createBiquadFilter();
+
+                noise.type = 'sawtooth';
+                noise.frequency.value = 60 + Math.random() * 40;
+
+                filter.type = 'lowpass';
+                filter.frequency.value = 200;
+                filter.Q.value = 2;
+
+                gain.gain.setValueAtTime(0.001, now);
+                gain.gain.linearRampToValueAtTime(0.025, now + 0.3);
+                gain.gain.linearRampToValueAtTime(0.001, now + 1.5);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.caveAmbientGain);
+
+                noise.start(now);
+                noise.stop(now + 1.6);
+            }
+
+            startPlainsAmbience() {
+                // Continuous cricket chorus
+                this.scheduleCricketChirp();
+                // Wind noise
+                this.startWindNoise();
+                // Occasional owl hoots
+                this.scheduleOwlHoot();
+                // Occasional frog croaks
+                this.scheduleFrogCroak();
+            }
+
+            startWindNoise() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+
+                // Use oscillators to simulate wind (layered low-frequency noise)
+                for (let i = 0; i < 3; i++) {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    const filter = ctx.createBiquadFilter();
+
+                    osc.type = 'sawtooth';
+                    osc.frequency.value = 80 + i * 30;
+
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 150 + i * 50;
+                    filter.Q.value = 0.5;
+
+                    gain.gain.value = 0.008;
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.plainsAmbientGain);
+                    osc.start();
+
+                    // Slowly modulate the filter for wind gusts
+                    const lfo = ctx.createOscillator();
+                    const lfoGain = ctx.createGain();
+                    lfo.frequency.value = 0.1 + Math.random() * 0.2;
+                    lfoGain.gain.value = 60;
+                    lfo.connect(lfoGain);
+                    lfoGain.connect(filter.frequency);
+                    lfo.start();
+                }
+            }
+
+            scheduleCricketChirp() {
+                if (!this.initialized) return;
+                const delay = 100 + Math.random() * 400;
+                const timer = setTimeout(() => {
+                    this.playCricketChirp();
+                    this.scheduleCricketChirp();
+                }, delay);
+                this.ambientTimers.push(timer);
+            }
+
+            playCricketChirp() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                const chirps = 2 + Math.floor(Math.random() * 4);
+                const baseFreq = 4000 + Math.random() * 2000;
+
+                for (let i = 0; i < chirps; i++) {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    const t = now + i * 0.06;
+
+                    osc.type = 'sine';
+                    osc.frequency.value = baseFreq;
+
+                    gain.gain.setValueAtTime(0, t);
+                    gain.gain.linearRampToValueAtTime(0.015, t + 0.01);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.04);
+
+                    osc.connect(gain);
+                    gain.connect(this.plainsAmbientGain);
+                    osc.start(t);
+                    osc.stop(t + 0.05);
+                }
+            }
+
+            scheduleOwlHoot() {
+                if (!this.initialized) return;
+                const delay = 8000 + Math.random() * 15000;
+                const timer = setTimeout(() => {
+                    this.playOwlHoot();
+                    this.scheduleOwlHoot();
+                }, delay);
+                this.ambientTimers.push(timer);
+            }
+
+            playOwlHoot() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                // Two-tone owl hoot: "hoo-HOO"
+                const hoots = [
+                    { freq: 350, time: 0, dur: 0.3, vol: 0.04 },
+                    { freq: 420, time: 0.4, dur: 0.5, vol: 0.06 }
+                ];
+
+                for (const h of hoots) {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    const filter = ctx.createBiquadFilter();
+                    const t = now + h.time;
+
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(h.freq, t);
+                    osc.frequency.linearRampToValueAtTime(h.freq * 0.9, t + h.dur);
+
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 600;
+
+                    gain.gain.setValueAtTime(0.001, t);
+                    gain.gain.linearRampToValueAtTime(h.vol, t + 0.05);
+                    gain.gain.setValueAtTime(h.vol, t + h.dur * 0.6);
+                    gain.gain.exponentialRampToValueAtTime(0.001, t + h.dur);
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.plainsAmbientGain);
+                    osc.start(t);
+                    osc.stop(t + h.dur + 0.05);
+                }
+            }
+
+            scheduleFrogCroak() {
+                if (!this.initialized) return;
+                const delay = 3000 + Math.random() * 7000;
+                const timer = setTimeout(() => {
+                    this.playFrogCroak();
+                    this.scheduleFrogCroak();
+                }, delay);
+                this.ambientTimers.push(timer);
+            }
+
+            playFrogCroak() {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'square';
+                const baseFreq = 120 + Math.random() * 80;
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.linearRampToValueAtTime(baseFreq * 0.7, now + 0.15);
+
+                gain.gain.setValueAtTime(0.001, now);
+                gain.gain.linearRampToValueAtTime(0.04, now + 0.02);
+                gain.gain.setValueAtTime(0.04, now + 0.08);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.plainsAmbientGain);
+                osc.start(now);
+                osc.stop(now + 0.25);
             }
 
             updateListenerPosition(position, forward, up) {
@@ -625,6 +944,108 @@
                     this.echoObjects.push(mesh);
                 }
 
+                // Underground pool (flat disc on the floor)
+                const poolGeometry = new THREE.CircleGeometry(8, 16);
+                const poolMesh = new THREE.Mesh(poolGeometry, this.echoMaterial.clone());
+                poolMesh.rotation.x = -Math.PI / 2;
+                poolMesh.position.set(-20, -4.9, -15);
+                this.scene.add(poolMesh);
+                this.echoObjects.push(poolMesh);
+
+                // Pool rim rocks
+                for (let i = 0; i < 12; i++) {
+                    const rockSize = 0.4 + Math.random() * 0.6;
+                    const rockGeometry = new THREE.SphereGeometry(rockSize, 5, 4);
+                    const rockMesh = new THREE.Mesh(rockGeometry, this.echoMaterial.clone());
+                    const angle = (i / 12) * Math.PI * 2;
+                    rockMesh.position.set(
+                        -20 + Math.cos(angle) * 8,
+                        -5 + rockSize * 0.3,
+                        -15 + Math.sin(angle) * 8
+                    );
+                    this.scene.add(rockMesh);
+                    this.echoObjects.push(rockMesh);
+                }
+
+                // Bat colony (cluster of small bats hanging from ceiling)
+                this.otherBats = [];
+                for (let i = 0; i < 12; i++) {
+                    // Each bat is a small group: body + two wings
+                    const bodyGeometry = new THREE.SphereGeometry(0.3, 4, 4);
+                    const body = new THREE.Mesh(bodyGeometry, this.echoMaterial.clone());
+                    const clusterX = 15 + (Math.random() - 0.5) * 12;
+                    const clusterZ = 20 + (Math.random() - 0.5) * 12;
+                    body.position.set(clusterX, 52 + Math.random() * 2, clusterZ);
+                    body.userData.isOtherBat = true;
+                    body.userData.hanging = true;
+                    body.userData.phase = Math.random() * Math.PI * 2;
+                    body.userData.speed = 0.3 + Math.random() * 0.5;
+                    body.userData.homeY = body.position.y;
+                    body.userData.homeX = body.position.x;
+                    body.userData.homeZ = body.position.z;
+
+                    // Wings (flat boxes)
+                    const wingGeometry = new THREE.BoxGeometry(0.8, 0.05, 0.4);
+                    const wingL = new THREE.Mesh(wingGeometry, this.echoMaterial.clone());
+                    wingL.position.set(-0.5, 0, 0);
+                    body.add(wingL);
+                    const wingR = new THREE.Mesh(wingGeometry, this.echoMaterial.clone());
+                    wingR.position.set(0.5, 0, 0);
+                    body.add(wingR);
+
+                    this.scene.add(body);
+                    this.echoObjects.push(body);
+                    this.otherBats.push(body);
+                }
+
+                // Cave spiders (small shapes clinging to walls)
+                for (let i = 0; i < 6; i++) {
+                    const spiderBody = new THREE.SphereGeometry(0.25, 4, 4);
+                    const spider = new THREE.Mesh(spiderBody, this.echoMaterial.clone());
+                    // Place on walls
+                    const wall = Math.floor(Math.random() * 4);
+                    if (wall === 0) spider.position.set(-48, 5 + Math.random() * 30, (Math.random() - 0.5) * 80);
+                    else if (wall === 1) spider.position.set(45, 5 + Math.random() * 30, (Math.random() - 0.5) * 80);
+                    else if (wall === 2) spider.position.set((Math.random() - 0.5) * 80, 5 + Math.random() * 30, -48);
+                    else spider.position.set((Math.random() - 0.5) * 80, 5 + Math.random() * 30, 45);
+
+                    spider.userData.isSpider = true;
+                    spider.userData.phase = Math.random() * Math.PI * 2;
+
+                    // Spider legs (thin cylinders radiating outward)
+                    for (let j = 0; j < 8; j++) {
+                        const legAngle = (j / 8) * Math.PI * 2;
+                        const legGeom = new THREE.CylinderGeometry(0.02, 0.02, 0.5, 3);
+                        const leg = new THREE.Mesh(legGeom, this.echoMaterial.clone());
+                        leg.rotation.z = Math.PI / 4;
+                        leg.rotation.y = legAngle;
+                        leg.position.set(Math.cos(legAngle) * 0.3, 0, Math.sin(legAngle) * 0.3);
+                        spider.add(leg);
+                    }
+
+                    this.scene.add(spider);
+                    this.echoObjects.push(spider);
+                }
+
+                // Rubble piles near cave walls
+                for (let i = 0; i < 5; i++) {
+                    const pileX = (Math.random() - 0.5) * 80;
+                    const pileZ = (Math.random() - 0.5) * 80;
+                    for (let j = 0; j < 4 + Math.floor(Math.random() * 4); j++) {
+                        const size = 0.3 + Math.random() * 0.8;
+                        const rubbleGeom = new THREE.DodecahedronGeometry(size, 0);
+                        const rubble = new THREE.Mesh(rubbleGeom, this.echoMaterial.clone());
+                        rubble.position.set(
+                            pileX + (Math.random() - 0.5) * 3,
+                            -5 + size * 0.3,
+                            pileZ + (Math.random() - 0.5) * 3
+                        );
+                        rubble.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                        this.scene.add(rubble);
+                        this.echoObjects.push(rubble);
+                    }
+                }
+
                 // Flying insects/moths (small spheres that move)
                 for (let i = 0; i < 15; i++) {
                     const geometry = new THREE.SphereGeometry(0.15, 4, 4);
@@ -719,19 +1140,145 @@
                     this.echoObjects.push(rockMesh);
                 }
 
-                // Plains insects (more plentiful outside)
+                // Bushes / shrubs
                 for (let i = 0; i < 30; i++) {
-                    const geometry = new THREE.SphereGeometry(0.2, 4, 4);
+                    const bushSize = 1.5 + Math.random() * 2;
+                    const bushGeometry = new THREE.SphereGeometry(bushSize, 5, 4);
+                    const bushMesh = new THREE.Mesh(bushGeometry, this.echoMaterial.clone());
+                    bushMesh.position.set(
+                        70 + Math.random() * 340,
+                        -5 + bushSize * 0.4,
+                        (Math.random() - 0.5) * 350
+                    );
+                    bushMesh.scale.y = 0.6; // Squash to look bush-like
+                    this.scene.add(bushMesh);
+                    this.echoObjects.push(bushMesh);
+                }
+
+                // Owls perched on trees (sphere body + triangle ear tufts)
+                for (let i = 0; i < 5; i++) {
+                    const owlBody = new THREE.SphereGeometry(0.6, 6, 6);
+                    const owl = new THREE.Mesh(owlBody, this.echoMaterial.clone());
+                    owl.position.set(
+                        100 + Math.random() * 300,
+                        12 + Math.random() * 8,
+                        (Math.random() - 0.5) * 300
+                    );
+                    owl.userData.isOwl = true;
+                    owl.userData.phase = Math.random() * Math.PI * 2;
+
+                    // Owl head
+                    const headGeom = new THREE.SphereGeometry(0.4, 6, 6);
+                    const head = new THREE.Mesh(headGeom, this.echoMaterial.clone());
+                    head.position.set(0, 0.7, 0);
+                    owl.add(head);
+
+                    // Ear tufts
+                    for (let side = -1; side <= 1; side += 2) {
+                        const earGeom = new THREE.ConeGeometry(0.12, 0.3, 4);
+                        const ear = new THREE.Mesh(earGeom, this.echoMaterial.clone());
+                        ear.position.set(side * 0.2, 1.1, 0);
+                        owl.add(ear);
+                    }
+
+                    this.scene.add(owl);
+                    this.echoObjects.push(owl);
+                }
+
+                // Frogs near the ground
+                for (let i = 0; i < 8; i++) {
+                    const frogBody = new THREE.SphereGeometry(0.25, 5, 4);
+                    const frog = new THREE.Mesh(frogBody, this.echoMaterial.clone());
+                    frog.position.set(
+                        80 + Math.random() * 320,
+                        -4.5,
+                        (Math.random() - 0.5) * 300
+                    );
+                    frog.scale.set(1, 0.6, 1.2); // Squash for frog shape
+                    frog.userData.isFrog = true;
+                    frog.userData.phase = Math.random() * Math.PI * 2;
+                    frog.userData.baseX = frog.position.x;
+                    frog.userData.baseZ = frog.position.z;
+
+                    // Eyes
+                    for (let side = -1; side <= 1; side += 2) {
+                        const eyeGeom = new THREE.SphereGeometry(0.08, 4, 4);
+                        const eye = new THREE.Mesh(eyeGeom, this.echoMaterial.clone());
+                        eye.position.set(side * 0.15, 0.2, 0.15);
+                        frog.add(eye);
+                    }
+
+                    this.scene.add(frog);
+                    this.echoObjects.push(frog);
+                }
+
+                // Other bats flying around plains at night
+                for (let i = 0; i < 8; i++) {
+                    const batBody = new THREE.SphereGeometry(0.25, 4, 4);
+                    const bat = new THREE.Mesh(batBody, this.echoMaterial.clone());
+                    bat.position.set(
+                        80 + Math.random() * 320,
+                        5 + Math.random() * 20,
+                        (Math.random() - 0.5) * 300
+                    );
+                    bat.userData.isOtherBat = true;
+                    bat.userData.hanging = false;
+                    bat.userData.phase = Math.random() * Math.PI * 2;
+                    bat.userData.speed = 1 + Math.random() * 2;
+                    bat.userData.homeX = bat.position.x;
+                    bat.userData.homeY = bat.position.y;
+                    bat.userData.homeZ = bat.position.z;
+                    bat.userData.flyRadius = 20 + Math.random() * 30;
+
+                    // Wings
+                    const wingGeometry = new THREE.BoxGeometry(0.7, 0.04, 0.35);
+                    const wingL = new THREE.Mesh(wingGeometry, this.echoMaterial.clone());
+                    wingL.position.set(-0.45, 0, 0);
+                    bat.add(wingL);
+                    const wingR = new THREE.Mesh(wingGeometry, this.echoMaterial.clone());
+                    wingR.position.set(0.45, 0, 0);
+                    bat.add(wingR);
+
+                    this.scene.add(bat);
+                    this.echoObjects.push(bat);
+                    if (!this.otherBats) this.otherBats = [];
+                    this.otherBats.push(bat);
+                }
+
+                // Tall grass patches
+                for (let i = 0; i < 20; i++) {
+                    const grassX = 70 + Math.random() * 350;
+                    const grassZ = (Math.random() - 0.5) * 350;
+                    for (let j = 0; j < 5 + Math.floor(Math.random() * 5); j++) {
+                        const bladeHeight = 1 + Math.random() * 1.5;
+                        const bladeGeom = new THREE.BoxGeometry(0.05, bladeHeight, 0.05);
+                        const blade = new THREE.Mesh(bladeGeom, this.echoMaterial.clone());
+                        blade.position.set(
+                            grassX + (Math.random() - 0.5) * 3,
+                            -5 + bladeHeight / 2,
+                            grassZ + (Math.random() - 0.5) * 3
+                        );
+                        blade.rotation.x = (Math.random() - 0.5) * 0.3;
+                        blade.rotation.z = (Math.random() - 0.5) * 0.3;
+                        this.scene.add(blade);
+                        this.echoObjects.push(blade);
+                    }
+                }
+
+                // Plains insects (more plentiful, fly lower, easier to catch)
+                for (let i = 0; i < 40; i++) {
+                    const size = 0.2 + Math.random() * 0.15; // Slightly bigger outdoors
+                    const geometry = new THREE.SphereGeometry(size, 4, 4);
                     const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
                     mesh.position.set(
-                        80 + Math.random() * 320,
-                        Math.random() * 25,
-                        (Math.random() - 0.5) * 350
+                        70 + Math.random() * 330,
+                        2 + Math.random() * 12, // Lower altitude range
+                        (Math.random() - 0.5) * 300
                     );
                     mesh.userData.isInsect = true;
                     mesh.userData.baseY = mesh.position.y;
                     mesh.userData.phase = Math.random() * Math.PI * 2;
-                    mesh.userData.speed = 0.5 + Math.random() * 2;
+                    mesh.userData.speed = 0.3 + Math.random() * 1.2; // Slower, easier to catch
                     mesh.userData.location = 'plains';
                     mesh.userData.eaten = false;
                     mesh.userData.baseX = mesh.position.x;
@@ -846,8 +1393,37 @@
                         insect.position.z = THREE.MathUtils.clamp(insect.position.z, -40, 40);
                     } else {
                         // Plains insects have wider range
-                        insect.position.x = THREE.MathUtils.clamp(insect.position.x, 80, 400);
-                        insect.position.z = THREE.MathUtils.clamp(insect.position.z, -170, 170);
+                        insect.position.x = THREE.MathUtils.clamp(insect.position.x, 70, 400);
+                        insect.position.z = THREE.MathUtils.clamp(insect.position.z, -150, 150);
+                    }
+                }
+
+                // Animate other bats
+                if (this.otherBats) {
+                    for (const bat of this.otherBats) {
+                        if (bat.userData.hanging) {
+                            // Cave bats: subtle swaying while hanging
+                            bat.rotation.z = Math.sin(time * bat.userData.speed + bat.userData.phase) * 0.1;
+                            // Occasionally one drops and flies briefly
+                            if (Math.sin(time * 0.1 + bat.userData.phase) > 0.95) {
+                                bat.position.y = bat.userData.homeY - 5 + Math.sin(time * 2) * 3;
+                            } else {
+                                bat.position.y = bat.userData.homeY;
+                            }
+                        } else {
+                            // Flying bats: circle around their home position
+                            const r = bat.userData.flyRadius;
+                            bat.position.x = bat.userData.homeX + Math.cos(time * bat.userData.speed + bat.userData.phase) * r;
+                            bat.position.z = bat.userData.homeZ + Math.sin(time * bat.userData.speed + bat.userData.phase) * r;
+                            bat.position.y = bat.userData.homeY + Math.sin(time * bat.userData.speed * 1.5 + bat.userData.phase) * 3;
+
+                            // Wing flapping
+                            if (bat.children.length >= 2) {
+                                const flapAngle = Math.sin(time * 12 + bat.userData.phase) * 0.4;
+                                bat.children[0].rotation.z = flapAngle;
+                                bat.children[1].rotation.z = -flapAngle;
+                            }
+                        }
                     }
                 }
             }
@@ -889,6 +1465,7 @@
                         this.currentLocation = 'plains';
                         pos.x = 55;
                         document.getElementById('locationIndicator').textContent = '📍 Open Plains';
+                        this.audio.setLocation('plains');
                     } else {
                         // Clamp within cave bounds
                         pos.x = THREE.MathUtils.clamp(pos.x, -45, 50);
@@ -901,6 +1478,7 @@
                         this.currentLocation = 'cave';
                         pos.x = 45;
                         document.getElementById('locationIndicator').textContent = '📍 Inside Cave';
+                        this.audio.setLocation('cave');
                     } else {
                         // Clamp within plains bounds
                         pos.x = THREE.MathUtils.clamp(pos.x, 50, 450);
@@ -946,7 +1524,8 @@
             tryEatInsect() {
                 if (this.gameOver) return;
 
-                const eatRange = 3; // How close you need to be to eat an insect
+                // Larger eat range outside (open air, easier to swoop)
+                const eatRange = this.currentLocation === 'plains' ? 6 : 4;
                 const playerPos = this.camera.position;
 
                 for (const insect of this.insects) {
@@ -1055,6 +1634,7 @@
                 document.getElementById('locationIndicator').textContent = '📍 Inside Cave';
                 document.getElementById('gameOver').classList.add('hidden');
                 this.revealedObjects.clear();
+                this.audio.setLocation('cave');
 
                 // Re-lock controls
                 this.controls.lock();
