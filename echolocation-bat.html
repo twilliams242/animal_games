@@ -891,7 +891,7 @@
                 // Hunger system
                 this.hunger = 100;
                 this.maxHunger = 100;
-                this.hungerDepleteRate = 2; // Per second
+                this.hungerDepleteRate = 0.8; // Per second
                 this.insectsEaten = 0;
                 this.hungerPerInsect = 25;
 
@@ -954,6 +954,62 @@
                     depthWrite: false,
                     blending: THREE.AdditiveBlending
                 });
+            }
+
+            createInsectSwarm(x, y, z, dotCount, spread, dotSize, options = {}) {
+                const swarm = new THREE.Group();
+                swarm.position.set(x, y, z);
+
+                // Each swarm member gets its own orbit parameters
+                swarm.userData.swarmDots = [];
+                const tinyGeometry = new THREE.SphereGeometry(dotSize, 3, 3);
+
+                for (let d = 0; d < dotCount; d++) {
+                    const dot = new THREE.Mesh(tinyGeometry, this.echoMaterial.clone());
+                    // Random starting offset within spread radius
+                    dot.position.set(
+                        (Math.random() - 0.5) * spread * 2,
+                        (Math.random() - 0.5) * spread * 2,
+                        (Math.random() - 0.5) * spread * 2
+                    );
+                    dot.userData.isInsect = true;
+                    dot.userData.parentSwarm = swarm;
+                    dot.userData.orbitRadius = spread * (0.3 + Math.random() * 0.7);
+                    dot.userData.orbitSpeed = 2 + Math.random() * 4;
+                    dot.userData.orbitPhase = Math.random() * Math.PI * 2;
+                    dot.userData.orbitTilt = (Math.random() - 0.5) * Math.PI;
+                    swarm.add(dot);
+                    this.echoObjects.push(dot);
+                    swarm.userData.swarmDots.push(dot);
+                }
+
+                swarm.userData.isInsect = true;
+                swarm.userData.baseY = y;
+                swarm.userData.phase = options.phase ?? Math.random() * Math.PI * 2;
+                swarm.userData.speed = options.speed ?? (0.5 + Math.random() * 1.5);
+                swarm.userData.location = options.location ?? 'cave';
+                swarm.userData.eaten = false;
+                if (options.baseX !== undefined) swarm.userData.baseX = options.baseX;
+                if (options.baseZ !== undefined) swarm.userData.baseZ = options.baseZ;
+
+                this.scene.add(swarm);
+                this.insects.push(swarm);
+                return swarm;
+            }
+
+            updateSwarmDots(time) {
+                for (const insect of this.insects) {
+                    if (insect.userData.eaten || !insect.userData.swarmDots) continue;
+                    for (const dot of insect.userData.swarmDots) {
+                        const r = dot.userData.orbitRadius;
+                        const s = dot.userData.orbitSpeed;
+                        const p = dot.userData.orbitPhase;
+                        const tilt = dot.userData.orbitTilt;
+                        dot.position.x = Math.cos(time * s + p) * r;
+                        dot.position.y = Math.sin(time * s * 1.3 + p) * r * 0.6;
+                        dot.position.z = Math.sin(time * s + p + tilt) * r;
+                    }
+                }
             }
 
             createCaveEnvironment() {
@@ -1145,24 +1201,16 @@
                     }
                 }
 
-                // Flying insects/moths (small spheres that move)
+                // Flying insect swarms (clusters of tiny dots)
                 for (let i = 0; i < 15; i++) {
-                    const geometry = new THREE.SphereGeometry(0.15, 4, 4);
-                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    mesh.position.set(
-                        (Math.random() - 0.5) * 60,
-                        5 + Math.random() * 30,
-                        (Math.random() - 0.5) * 60
-                    );
-                    mesh.userData.isInsect = true;
-                    mesh.userData.baseY = mesh.position.y;
-                    mesh.userData.phase = Math.random() * Math.PI * 2;
-                    mesh.userData.speed = 0.5 + Math.random() * 1.5;
-                    mesh.userData.location = 'cave';
-                    mesh.userData.eaten = false;
-                    this.scene.add(mesh);
-                    this.echoObjects.push(mesh);
-                    this.insects.push(mesh);
+                    const x = (Math.random() - 0.5) * 60;
+                    const y = 5 + Math.random() * 30;
+                    const z = (Math.random() - 0.5) * 60;
+                    const dotCount = 4 + Math.floor(Math.random() * 4); // 4-7 dots per swarm
+                    this.createInsectSwarm(x, y, z, dotCount, 0.6, 0.04, {
+                        location: 'cave',
+                        speed: 0.5 + Math.random() * 1.5
+                    });
                 }
 
                 // Cave entrance/exit (glowing arch on the east side)
@@ -1364,27 +1412,18 @@
                     }
                 }
 
-                // Plains insects (more plentiful, fly lower, easier to catch)
+                // Plains insect swarms (more plentiful, fly lower, easier to catch)
                 for (let i = 0; i < 40; i++) {
-                    const size = 0.2 + Math.random() * 0.15; // Slightly bigger outdoors
-                    const geometry = new THREE.SphereGeometry(size, 4, 4);
-                    const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    mesh.position.set(
-                        70 + Math.random() * 330,
-                        2 + Math.random() * 12, // Lower altitude range
-                        (Math.random() - 0.5) * 300
-                    );
-                    mesh.userData.isInsect = true;
-                    mesh.userData.baseY = mesh.position.y;
-                    mesh.userData.phase = Math.random() * Math.PI * 2;
-                    mesh.userData.speed = 0.3 + Math.random() * 1.2; // Slower, easier to catch
-                    mesh.userData.location = 'plains';
-                    mesh.userData.eaten = false;
-                    mesh.userData.baseX = mesh.position.x;
-                    mesh.userData.baseZ = mesh.position.z;
-                    this.scene.add(mesh);
-                    this.echoObjects.push(mesh);
-                    this.insects.push(mesh);
+                    const x = 70 + Math.random() * 330;
+                    const y = 2 + Math.random() * 12; // Lower altitude
+                    const z = (Math.random() - 0.5) * 300;
+                    const dotCount = 5 + Math.floor(Math.random() * 5); // 5-9 dots per swarm
+                    this.createInsectSwarm(x, y, z, dotCount, 0.8, 0.05, {
+                        location: 'plains',
+                        speed: 0.3 + Math.random() * 1.2,
+                        baseX: x,
+                        baseZ: z
+                    });
                 }
 
                 // Entry arch back to cave
@@ -1438,13 +1477,15 @@
                         intensities.push(pulse.intensity);
 
                         // Check for echoes from objects
+                        const _worldPos = new THREE.Vector3();
                         for (const obj of this.echoObjects) {
                             if (!pulse.echoedObjects.has(obj)) {
-                                const dist = pulse.origin.distanceTo(obj.position);
+                                obj.getWorldPosition(_worldPos);
+                                const dist = pulse.origin.distanceTo(_worldPos);
                                 if (Math.abs(dist - pulse.radius) < 3) {
                                     pulse.echoedObjects.add(obj);
                                     this.audio.playEcho(
-                                        obj.position,
+                                        _worldPos,
                                         this.camera.position,
                                         dist,
                                         this.maxPulseRadius
@@ -1496,6 +1537,9 @@
                         insect.position.z = THREE.MathUtils.clamp(insect.position.z, -150, 150);
                     }
                 }
+
+                // Animate swarm dots orbiting within each insect group
+                this.updateSwarmDots(time);
 
                 // Animate other bats
                 if (this.otherBats) {
@@ -1663,22 +1707,53 @@
                 const ctx = this.audio.audioContext;
                 const now = ctx.currentTime;
 
-                // Satisfying crunch/chomp sound
-                const oscillator = ctx.createOscillator();
-                const gainNode = ctx.createGain();
+                // Rapid munching sequence (3-5 quick chews)
+                const numChews = 3 + Math.floor(Math.random() * 3);
+                for (let i = 0; i < numChews; i++) {
+                    const t = now + i * 0.08;
 
-                oscillator.type = 'square';
-                oscillator.frequency.setValueAtTime(200, now);
-                oscillator.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+                    // Crunchy noise burst
+                    const noise = ctx.createOscillator();
+                    const noiseGain = ctx.createGain();
+                    const filter = ctx.createBiquadFilter();
 
-                gainNode.gain.setValueAtTime(0.3, now);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    noise.type = 'sawtooth';
+                    const freq = 150 + Math.random() * 100;
+                    noise.frequency.setValueAtTime(freq, t);
+                    noise.frequency.exponentialRampToValueAtTime(freq * 0.3, t + 0.05);
 
-                oscillator.connect(gainNode);
-                gainNode.connect(ctx.destination);
+                    filter.type = 'bandpass';
+                    filter.frequency.value = 800 + Math.random() * 600;
+                    filter.Q.value = 2;
 
-                oscillator.start(now);
-                oscillator.stop(now + 0.15);
+                    // Each chew has a quick attack and decay
+                    const vol = 0.15 + Math.random() * 0.1;
+                    noiseGain.gain.setValueAtTime(0, t);
+                    noiseGain.gain.linearRampToValueAtTime(vol, t + 0.01);
+                    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+
+                    noise.connect(filter);
+                    filter.connect(noiseGain);
+                    noiseGain.connect(ctx.destination);
+                    noise.start(t);
+                    noise.stop(t + 0.07);
+
+                    // Wet squelch layer on some chews
+                    if (Math.random() < 0.6) {
+                        const squelch = ctx.createOscillator();
+                        const sqGain = ctx.createGain();
+                        squelch.type = 'sine';
+                        squelch.frequency.setValueAtTime(300 + Math.random() * 200, t);
+                        squelch.frequency.exponentialRampToValueAtTime(80, t + 0.04);
+                        sqGain.gain.setValueAtTime(0, t);
+                        sqGain.gain.linearRampToValueAtTime(0.08, t + 0.005);
+                        sqGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+                        squelch.connect(sqGain);
+                        sqGain.connect(ctx.destination);
+                        squelch.start(t);
+                        squelch.stop(t + 0.06);
+                    }
+                }
             }
 
             respawnInsect(insect) {
@@ -1807,10 +1882,13 @@
                     for (const obj of pulse.echoedObjects) {
                         if (!this.revealedObjects.has(obj) || now - this.revealedObjects.get(obj).time < 0.5) {
                             let type = 'structure';
-                            if (obj.userData.isInsect && !obj.userData.eaten) type = 'insect';
+                            const isEaten = obj.userData.eaten || (obj.userData.parentSwarm && obj.userData.parentSwarm.userData.eaten);
+                            if (obj.userData.isInsect && !isEaten) type = 'insect';
+                            const worldPos = new THREE.Vector3();
+                            obj.getWorldPosition(worldPos);
                             this.revealedObjects.set(obj, {
-                                x: obj.position.x,
-                                z: obj.position.z,
+                                x: worldPos.x,
+                                z: worldPos.z,
                                 time: now,
                                 type: type
                             });
