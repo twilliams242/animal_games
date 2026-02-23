@@ -192,8 +192,7 @@
             <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> - Fly around<br>
             <span class="key">↑</span> - Ascend | <span class="key">↓</span> - Descend<br>
             <span class="key">MOUSE</span> - Look around<br>
-            <span class="key">SPACE</span> - Emit sonar pulse<br>
-            <span class="key">E</span> - Eat nearby insects
+            <span class="key">SPACE</span> - Emit sonar pulse
         </p>
         <p style="color: #ff9944; margin-top: 15px;">
             Your hunger slowly depletes - catch insects to survive!<br>
@@ -225,7 +224,7 @@
         <div>Altitude: <span id="altitude">0</span>m</div>
         <div>Pulses: <span id="pulseCount">0</span></div>
         <div>Insects eaten: <span id="insectsEaten">0</span></div>
-        <div style="margin-top: 10px; color: #666;">SPACE to echolocate | E to eat</div>
+        <div style="margin-top: 10px; color: #666;">SPACE to echolocate | Fly near insects to eat</div>
     </div>
 
     <div id="crosshair" class="hidden"></div>
@@ -582,6 +581,106 @@
                 gain.connect(this.plainsAmbientGain);
                 osc.start(now);
                 osc.stop(now + 0.25);
+            }
+
+            // Dynamic insect buzzing system
+            initInsectSounds(maxSources = 8) {
+                if (!this.initialized) return;
+                const ctx = this.audioContext;
+                this.insectSources = [];
+
+                for (let i = 0; i < maxSources; i++) {
+                    // Create a buzzing oscillator pair per voice
+                    const osc1 = ctx.createOscillator();
+                    const osc2 = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    const panner = ctx.createPanner();
+
+                    // Fundamental buzz (wing beat frequency)
+                    osc1.type = 'sawtooth';
+                    osc1.frequency.value = 180 + Math.random() * 40;
+
+                    // Higher harmonic for "whine"
+                    osc2.type = 'sine';
+                    osc2.frequency.value = 600 + Math.random() * 200;
+
+                    const osc1Gain = ctx.createGain();
+                    osc1Gain.gain.value = 0.6;
+                    const osc2Gain = ctx.createGain();
+                    osc2Gain.gain.value = 0.4;
+
+                    // Spatial panner
+                    panner.panningModel = 'HRTF';
+                    panner.distanceModel = 'inverse';
+                    panner.refDistance = 2;
+                    panner.maxDistance = 30;
+                    panner.rolloffFactor = 2;
+
+                    // Start silent
+                    gain.gain.value = 0;
+
+                    osc1.connect(osc1Gain);
+                    osc2.connect(osc2Gain);
+                    osc1Gain.connect(gain);
+                    osc2Gain.connect(gain);
+                    gain.connect(panner);
+                    panner.connect(ctx.destination);
+
+                    osc1.start();
+                    osc2.start();
+
+                    this.insectSources.push({
+                        osc1, osc2, gain, panner,
+                        assignedInsect: null
+                    });
+                }
+            }
+
+            updateInsectPositions(insects, playerPos) {
+                if (!this.initialized || !this.insectSources) return;
+                const ctx = this.audioContext;
+                const now = ctx.currentTime;
+
+                // Sort insects by distance to player, closest first
+                const sorted = insects
+                    .filter(ins => !ins.userData.eaten && ins.visible)
+                    .map(ins => ({
+                        insect: ins,
+                        dist: playerPos.distanceTo(ins.position)
+                    }))
+                    .sort((a, b) => a.dist - b.dist);
+
+                const maxRange = 30; // Beyond this distance, no sound
+
+                for (let i = 0; i < this.insectSources.length; i++) {
+                    const src = this.insectSources[i];
+
+                    if (i < sorted.length && sorted[i].dist < maxRange) {
+                        const { insect, dist } = sorted[i];
+                        const pos = insect.position;
+
+                        // Update panner position
+                        src.panner.positionX.setValueAtTime(pos.x, now);
+                        src.panner.positionY.setValueAtTime(pos.y, now);
+                        src.panner.positionZ.setValueAtTime(pos.z, now);
+
+                        // Volume based on proximity (louder when closer)
+                        const proximity = 1 - (dist / maxRange);
+                        const targetVol = proximity * proximity * 0.12;
+                        src.gain.gain.linearRampToValueAtTime(targetVol, now + 0.05);
+
+                        // Pitch shifts slightly based on distance (doppler-like)
+                        const pitchShift = 1 + proximity * 0.15;
+                        src.osc1.frequency.linearRampToValueAtTime((180 + i * 5) * pitchShift, now + 0.05);
+                        src.osc2.frequency.linearRampToValueAtTime((600 + i * 25) * pitchShift, now + 0.05);
+
+                        src.assignedInsect = insect;
+                    } else {
+                        // No insect for this voice — fade out
+                        src.gain.gain.linearRampToValueAtTime(0, now + 0.1);
+                        src.assignedInsect = null;
+                    }
+                }
             }
 
             updateListenerPosition(position, forward, up) {
@@ -1521,6 +1620,11 @@
                 }
             }
 
+            updateInsectSounds() {
+                if (this.gameOver) return;
+                this.audio.updateInsectPositions(this.insects, this.camera.position);
+            }
+
             tryEatInsect() {
                 if (this.gameOver) return;
 
@@ -1797,6 +1901,7 @@
                 // Start button
                 document.getElementById('startBtn').addEventListener('click', () => {
                     this.audio.init();
+                    this.audio.initInsectSounds();
                     this.controls.lock();
                 });
 
@@ -1841,7 +1946,7 @@
                             }
                             e.preventDefault();
                             break;
-                        case 'KeyE': this.tryEatInsect(); break;
+                        case 'KeyE': break; // Eating is now automatic
                     }
                 });
 
@@ -1880,9 +1985,11 @@
                 this.updatePulses(delta);
                 this.updateInsects(delta);
 
-                // Update hunger when game is active
+                // Update hunger and auto-eat when game is active
                 if (this.controls.isLocked && !this.gameOver) {
                     this.updateHunger(delta);
+                    this.tryEatInsect();
+                    this.updateInsectSounds();
                 }
 
                 // Update minimap
