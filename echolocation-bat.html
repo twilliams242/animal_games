@@ -1033,10 +1033,10 @@
                     vertexShader: echolocationVertexShader,
                     fragmentShader: echolocationFragmentShader,
                     uniforms: {
-                        pulseOrigins: { value: new Array(10).fill(new THREE.Vector3()) },
+                        pulseOrigins: { value: Array.from({length: 10}, () => new THREE.Vector3()) },
                         pulseRadii: { value: new Array(10).fill(0) },
                         pulseIntensities: { value: new Array(10).fill(0) },
-                        pulseDirections: { value: new Array(10).fill(new THREE.Vector3(0, 0, -1)) },
+                        pulseDirections: { value: Array.from({length: 10}, () => new THREE.Vector3(0, 0, -1)) },
                         pulseHalfAngles: { value: new Array(10).fill(0.44) },
                         pulseWavefrontWidths: { value: new Array(10).fill(3.0) },
                         activePulses: { value: 0 },
