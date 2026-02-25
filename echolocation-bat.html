@@ -1030,17 +1030,17 @@
                 this.wakeupDuration = 1.2;  // seconds to flip and drop
                 this.introWaypoints = [
                     // Start inside cave near entrance, looking out at the arch
-                    { pos: new THREE.Vector3(35, 12, 8), lookAt: new THREE.Vector3(48, 8, 0), time: 0 },
-                    // Turn and glide deeper into cave, viewing stalactites above
-                    { pos: new THREE.Vector3(15, 18, -10), lookAt: new THREE.Vector3(-20, 25, 5), time: 2.0 },
+                    { pos: new THREE.Vector3(38, 18, 5), lookAt: new THREE.Vector3(50, 12, 0), time: 0 },
+                    // Turn and glide deeper into cave, viewing curved ceiling
+                    { pos: new THREE.Vector3(15, 28, -8), lookAt: new THREE.Vector3(-15, 40, 5), time: 2.0 },
                     // Swoop low past stalagmites and pool
-                    { pos: new THREE.Vector3(-15, 8, 15), lookAt: new THREE.Vector3(-30, 5, -10), time: 3.5 },
-                    // Curve around far end, looking back across the cave
-                    { pos: new THREE.Vector3(-30, 22, -20), lookAt: new THREE.Vector3(10, 30, 10), time: 5.0 },
-                    // Rise toward ceiling near bat colony
-                    { pos: new THREE.Vector3(5, 42, 15), lookAt: new THREE.Vector3(15, 52, 20), time: 6.5 },
-                    // Final position: upside down on ceiling with the colony
-                    { pos: new THREE.Vector3(10, 52, 22), lookAt: new THREE.Vector3(35, 10, 0), time: 8.0, upsideDown: true }
+                    { pos: new THREE.Vector3(-12, 5, 10), lookAt: new THREE.Vector3(-25, 0, -10), time: 3.5 },
+                    // Curve around, looking back across the dome
+                    { pos: new THREE.Vector3(-25, 25, -15), lookAt: new THREE.Vector3(10, 35, 10), time: 5.0 },
+                    // Rise toward domed ceiling near bat colony
+                    { pos: new THREE.Vector3(5, 45, 8), lookAt: new THREE.Vector3(10, 54, 8), time: 6.5 },
+                    // Final position: upside down on curved ceiling with colony
+                    { pos: new THREE.Vector3(10, 54, 8), lookAt: new THREE.Vector3(40, 15, 0), time: 8.0, upsideDown: true }
                 ];
 
                 this.init();
@@ -1054,7 +1054,7 @@
                 this.container.appendChild(this.renderer.domElement);
 
                 // Camera position (start in the cave)
-                this.camera.position.set(0, 5, 0);
+                this.camera.position.set(0, 12, 0);
 
                 // Controls
                 this.controls = new PointerLockControls(this.camera, document.body);
@@ -1159,66 +1159,101 @@
             }
 
             createCaveEnvironment() {
-                // Cave walls (large box surrounding the player)
-                const caveSize = 100;
-                const wallGeometry = new THREE.BoxGeometry(caveSize, caveSize * 0.6, caveSize);
-                const caveMesh = new THREE.Mesh(wallGeometry, this.echoMaterial.clone());
-                caveMesh.geometry.deleteAttribute('uv');
+                // Cave chamber - ellipsoid (squashed sphere) for organic cave feel
+                const caveRadius = 55;
+                const caveHeight = 35;
+                const segments = 32;
+                const caveGeometry = new THREE.SphereGeometry(caveRadius, segments, segments);
+
+                // Scale to make it wider than tall (cavern shape)
+                caveGeometry.scale(1.0, caveHeight / caveRadius, 1.0);
+
+                // Add organic irregularity to vertices
+                const positions = caveGeometry.attributes.position.array;
+                for (let i = 0; i < positions.length; i += 3) {
+                    const x = positions[i];
+                    const y = positions[i + 1];
+                    const z = positions[i + 2];
+                    // Create noise-like displacement based on position
+                    const noise = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 4 +
+                                  Math.sin(x * 0.3 + z * 0.2) * 2 +
+                                  Math.cos(y * 0.2 + x * 0.1) * 3;
+                    const dist = Math.sqrt(x * x + z * z);
+                    // Displace vertices outward/inward for bumpy walls
+                    const factor = 1 + noise * 0.08;
+                    positions[i] *= factor;
+                    positions[i + 1] *= factor;
+                    positions[i + 2] *= factor;
+                }
+                caveGeometry.attributes.position.needsUpdate = true;
+                caveGeometry.computeVertexNormals();
+
                 // Invert normals for interior view
-                caveMesh.geometry.computeVertexNormals();
-                const positions = caveMesh.geometry.attributes.position.array;
-                const normals = caveMesh.geometry.attributes.normal.array;
+                const normals = caveGeometry.attributes.normal.array;
                 for (let i = 0; i < normals.length; i++) {
                     normals[i] *= -1;
                 }
-                caveMesh.geometry.attributes.normal.needsUpdate = true;
-                caveMesh.position.set(0, 25, 0);
+                caveGeometry.attributes.normal.needsUpdate = true;
+
+                const caveMesh = new THREE.Mesh(caveGeometry, this.echoMaterial.clone());
+                caveMesh.position.set(0, 22, 0);
                 this.scene.add(caveMesh);
                 this.echoObjects.push(caveMesh);
 
-                // Stalactites (hanging from ceiling)
-                for (let i = 0; i < 30; i++) {
-                    const height = 3 + Math.random() * 8;
-                    const radius = 0.3 + Math.random() * 0.7;
+                // Stalactites (hanging from curved ceiling)
+                for (let i = 0; i < 35; i++) {
+                    const height = 3 + Math.random() * 10;
+                    const radius = 0.3 + Math.random() * 0.8;
                     const geometry = new THREE.ConeGeometry(radius, height, 6);
                     const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    mesh.position.set(
-                        (Math.random() - 0.5) * 80,
-                        55 - height / 2,
-                        (Math.random() - 0.5) * 80
-                    );
+                    // Random position within cave radius
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * 40; // Keep away from edges
+                    const x = Math.cos(angle) * dist;
+                    const z = Math.sin(angle) * dist;
+                    // Calculate ceiling height at this position (ellipsoid surface)
+                    const normalizedDist = Math.sqrt(x * x + z * z) / 55;
+                    const ceilingY = 22 + 35 * Math.sqrt(Math.max(0, 1 - normalizedDist * normalizedDist));
+                    mesh.position.set(x, ceilingY - height / 2 - 1, z);
                     mesh.rotation.x = Math.PI;
                     this.scene.add(mesh);
                     this.echoObjects.push(mesh);
                 }
 
-                // Stalagmites (rising from floor)
-                for (let i = 0; i < 25; i++) {
-                    const height = 2 + Math.random() * 6;
-                    const radius = 0.4 + Math.random() * 0.8;
+                // Stalagmites (rising from curved floor)
+                for (let i = 0; i < 30; i++) {
+                    const height = 2 + Math.random() * 7;
+                    const radius = 0.4 + Math.random() * 1.0;
                     const geometry = new THREE.ConeGeometry(radius, height, 6);
                     const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    mesh.position.set(
-                        (Math.random() - 0.5) * 80,
-                        -5 + height / 2,
-                        (Math.random() - 0.5) * 80
-                    );
+                    // Random position within cave radius
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * 40;
+                    const x = Math.cos(angle) * dist;
+                    const z = Math.sin(angle) * dist;
+                    // Calculate floor height at this position (ellipsoid surface)
+                    const normalizedDist = Math.sqrt(x * x + z * z) / 55;
+                    const floorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - normalizedDist * normalizedDist));
+                    mesh.position.set(x, floorY + height / 2, z);
                     this.scene.add(mesh);
                     this.echoObjects.push(mesh);
                 }
 
                 // Rock formations (scattered spheres and boxes)
-                for (let i = 0; i < 20; i++) {
-                    const size = 1 + Math.random() * 3;
+                for (let i = 0; i < 25; i++) {
+                    const size = 1 + Math.random() * 4;
                     const geometry = Math.random() > 0.5
                         ? new THREE.SphereGeometry(size, 8, 6)
                         : new THREE.BoxGeometry(size, size * 0.7, size);
                     const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    mesh.position.set(
-                        (Math.random() - 0.5) * 70,
-                        -5 + size * 0.5 + Math.random() * 3,
-                        (Math.random() - 0.5) * 70
-                    );
+                    // Random position within cave
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * 38;
+                    const x = Math.cos(angle) * dist;
+                    const z = Math.sin(angle) * dist;
+                    const normalizedDist = Math.sqrt(x * x + z * z) / 55;
+                    const floorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - normalizedDist * normalizedDist));
+                    mesh.position.set(x, floorY + size * 0.5, z);
                     mesh.rotation.set(
                         Math.random() * Math.PI,
                         Math.random() * Math.PI,
@@ -1228,28 +1263,33 @@
                     this.echoObjects.push(mesh);
                 }
 
-                // Columns
+                // Columns (connecting floor to ceiling)
                 for (let i = 0; i < 8; i++) {
                     const radius = 1 + Math.random() * 1.5;
-                    const height = 40 + Math.random() * 15;
+                    const columnAngle = (i / 8) * Math.PI * 2 + Math.random() * 0.3;
+                    const distance = 20 + Math.random() * 12;
+                    const x = Math.cos(columnAngle) * distance;
+                    const z = Math.sin(columnAngle) * distance;
+                    const normalizedDist = Math.sqrt(x * x + z * z) / 55;
+                    const floorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - normalizedDist * normalizedDist));
+                    const ceilingY = 22 + 35 * Math.sqrt(Math.max(0, 1 - normalizedDist * normalizedDist));
+                    const height = ceilingY - floorY;
                     const geometry = new THREE.CylinderGeometry(radius, radius * 1.3, height, 8);
                     const mesh = new THREE.Mesh(geometry, this.echoMaterial.clone());
-                    const angle = (i / 8) * Math.PI * 2;
-                    const distance = 25 + Math.random() * 10;
-                    mesh.position.set(
-                        Math.cos(angle) * distance,
-                        height / 2 - 5,
-                        Math.sin(angle) * distance
+                    mesh.position.set(x, floorY + height / 2, z
                     );
                     this.scene.add(mesh);
                     this.echoObjects.push(mesh);
                 }
 
                 // Underground pool (flat disc on the floor)
+                const poolX = -15, poolZ = -12;
+                const poolNormDist = Math.sqrt(poolX * poolX + poolZ * poolZ) / 55;
+                const poolFloorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - poolNormDist * poolNormDist));
                 const poolGeometry = new THREE.CircleGeometry(8, 16);
                 const poolMesh = new THREE.Mesh(poolGeometry, this.echoMaterial.clone());
                 poolMesh.rotation.x = -Math.PI / 2;
-                poolMesh.position.set(-20, -4.9, -15);
+                poolMesh.position.set(poolX, poolFloorY + 0.1, poolZ);
                 this.scene.add(poolMesh);
                 this.echoObjects.push(poolMesh);
 
@@ -1258,25 +1298,28 @@
                     const rockSize = 0.4 + Math.random() * 0.6;
                     const rockGeometry = new THREE.SphereGeometry(rockSize, 5, 4);
                     const rockMesh = new THREE.Mesh(rockGeometry, this.echoMaterial.clone());
-                    const angle = (i / 12) * Math.PI * 2;
-                    rockMesh.position.set(
-                        -20 + Math.cos(angle) * 8,
-                        -5 + rockSize * 0.3,
-                        -15 + Math.sin(angle) * 8
-                    );
+                    const rockAngle = (i / 12) * Math.PI * 2;
+                    const rx = poolX + Math.cos(rockAngle) * 8;
+                    const rz = poolZ + Math.sin(rockAngle) * 8;
+                    const rNormDist = Math.sqrt(rx * rx + rz * rz) / 55;
+                    const rFloorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - rNormDist * rNormDist));
+                    rockMesh.position.set(rx, rFloorY + rockSize * 0.3, rz);
                     this.scene.add(rockMesh);
                     this.echoObjects.push(rockMesh);
                 }
 
-                // Bat colony (cluster of small bats hanging from ceiling)
+                // Bat colony (cluster of small bats hanging from curved ceiling)
                 this.otherBats = [];
                 for (let i = 0; i < 12; i++) {
                     // Each bat is a small group: body + two wings
                     const bodyGeometry = new THREE.SphereGeometry(0.3, 4, 4);
                     const body = new THREE.Mesh(bodyGeometry, this.echoMaterial.clone());
-                    const clusterX = 15 + (Math.random() - 0.5) * 12;
-                    const clusterZ = 20 + (Math.random() - 0.5) * 12;
-                    body.position.set(clusterX, 52 + Math.random() * 2, clusterZ);
+                    const clusterX = 10 + (Math.random() - 0.5) * 15;
+                    const clusterZ = 8 + (Math.random() - 0.5) * 15;
+                    // Calculate ceiling height at bat position
+                    const batNormDist = Math.sqrt(clusterX * clusterX + clusterZ * clusterZ) / 55;
+                    const batCeilingY = 22 + 35 * Math.sqrt(Math.max(0, 1 - batNormDist * batNormDist));
+                    body.position.set(clusterX, batCeilingY - 1 - Math.random() * 2, clusterZ);
                     body.userData.isOtherBat = true;
                     body.userData.hanging = true;
                     body.userData.phase = Math.random() * Math.PI * 2;
@@ -1299,16 +1342,20 @@
                     this.otherBats.push(body);
                 }
 
-                // Cave spiders (small shapes clinging to walls)
-                for (let i = 0; i < 6; i++) {
+                // Cave spiders (small shapes clinging to curved walls)
+                for (let i = 0; i < 8; i++) {
                     const spiderBody = new THREE.SphereGeometry(0.25, 4, 4);
                     const spider = new THREE.Mesh(spiderBody, this.echoMaterial.clone());
-                    // Place on walls
-                    const wall = Math.floor(Math.random() * 4);
-                    if (wall === 0) spider.position.set(-48, 5 + Math.random() * 30, (Math.random() - 0.5) * 80);
-                    else if (wall === 1) spider.position.set(45, 5 + Math.random() * 30, (Math.random() - 0.5) * 80);
-                    else if (wall === 2) spider.position.set((Math.random() - 0.5) * 80, 5 + Math.random() * 30, -48);
-                    else spider.position.set((Math.random() - 0.5) * 80, 5 + Math.random() * 30, 45);
+                    // Place on curved walls (near ellipsoid edge)
+                    const spiderAngle = Math.random() * Math.PI * 2;
+                    const wallDist = 48 + Math.random() * 5; // Near the edge
+                    const sx = Math.cos(spiderAngle) * wallDist;
+                    const sz = Math.sin(spiderAngle) * wallDist;
+                    const sNormDist = Math.sqrt(sx * sx + sz * sz) / 55;
+                    const maxY = 22 + 35 * Math.sqrt(Math.max(0, 1 - sNormDist * sNormDist));
+                    const minY = 22 - 35 * Math.sqrt(Math.max(0, 1 - sNormDist * sNormDist));
+                    const sy = minY + Math.random() * (maxY - minY);
+                    spider.position.set(sx * 0.92, sy, sz * 0.92); // Slightly inside wall
 
                     spider.userData.isSpider = true;
                     spider.userData.phase = Math.random() * Math.PI * 2;
@@ -1328,17 +1375,21 @@
                     this.echoObjects.push(spider);
                 }
 
-                // Rubble piles near cave walls
-                for (let i = 0; i < 5; i++) {
-                    const pileX = (Math.random() - 0.5) * 80;
-                    const pileZ = (Math.random() - 0.5) * 80;
+                // Rubble piles on cave floor
+                for (let i = 0; i < 6; i++) {
+                    const pileAngle = Math.random() * Math.PI * 2;
+                    const pileDist = Math.random() * 35;
+                    const pileX = Math.cos(pileAngle) * pileDist;
+                    const pileZ = Math.sin(pileAngle) * pileDist;
+                    const pileNormDist = Math.sqrt(pileX * pileX + pileZ * pileZ) / 55;
+                    const pileFloorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - pileNormDist * pileNormDist));
                     for (let j = 0; j < 4 + Math.floor(Math.random() * 4); j++) {
                         const size = 0.3 + Math.random() * 0.8;
                         const rubbleGeom = new THREE.DodecahedronGeometry(size, 0);
                         const rubble = new THREE.Mesh(rubbleGeom, this.echoMaterial.clone());
                         rubble.position.set(
                             pileX + (Math.random() - 0.5) * 3,
-                            -5 + size * 0.3,
+                            pileFloorY + size * 0.3,
                             pileZ + (Math.random() - 0.5) * 3
                         );
                         rubble.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
@@ -1349,9 +1400,14 @@
 
                 // Flying insect swarms (clusters of tiny dots)
                 for (let i = 0; i < 15; i++) {
-                    const x = (Math.random() - 0.5) * 60;
-                    const y = 5 + Math.random() * 30;
-                    const z = (Math.random() - 0.5) * 60;
+                    const insectAngle = Math.random() * Math.PI * 2;
+                    const insectDist = Math.random() * 35;
+                    const x = Math.cos(insectAngle) * insectDist;
+                    const z = Math.sin(insectAngle) * insectDist;
+                    const iNormDist = Math.sqrt(x * x + z * z) / 55;
+                    const floorY = 22 - 35 * Math.sqrt(Math.max(0, 1 - iNormDist * iNormDist));
+                    const ceilY = 22 + 35 * Math.sqrt(Math.max(0, 1 - iNormDist * iNormDist));
+                    const y = floorY + 3 + Math.random() * (ceilY - floorY - 6);
                     const dotCount = 4 + Math.floor(Math.random() * 4); // 4-7 dots per swarm
                     this.createInsectSwarm(x, y, z, dotCount, 0.6, 0.04, {
                         location: 'cave',
@@ -1993,13 +2049,13 @@
                 // Smooth ease-out
                 const ease = 1 - (1 - t) * (1 - t);
 
-                // Drop from ceiling (y=52) to flying height (y=5)
-                const startY = 52;
-                const endY = 5;
+                // Drop from domed ceiling to flying height
+                const startY = 54;
+                const endY = 12;
                 this.camera.position.y = startY + (endY - startY) * ease;
                 // Drift toward center of cave
                 this.camera.position.x = 10 * (1 - ease) + 0 * ease;
-                this.camera.position.z = 22 * (1 - ease) + 0 * ease;
+                this.camera.position.z = 8 * (1 - ease) + 0 * ease;
 
                 // Flip from upside down (PI) to right side up (0)
                 this.camera.rotation.z = Math.PI * (1 - ease);
@@ -2012,7 +2068,7 @@
 
                 if (t >= 1.0) {
                     this.wakeupActive = false;
-                    this.camera.position.set(0, 5, 0);
+                    this.camera.position.set(0, 12, 0);
                     this.camera.rotation.z = 0;
                 }
             }
@@ -2049,20 +2105,29 @@
 
                 if (this.currentLocation === 'cave') {
                     // In cave - check for exit to plains
-                    if (pos.x > 50 && Math.abs(pos.z) < 10 && pos.y < 20) {
+                    if (pos.x > 48 && Math.abs(pos.z) < 10 && pos.y < 25) {
                         // Transition to plains
                         this.currentLocation = 'plains';
                         pos.x = 55;
                         document.getElementById('locationIndicator').textContent = '📍 Open Plains';
                         this.audio.setLocation('plains');
                     } else {
-                        // Clamp within cave bounds
-                        pos.x = THREE.MathUtils.clamp(pos.x, -45, 50);
-                        pos.z = THREE.MathUtils.clamp(pos.z, -45, 45);
+                        // Clamp within ellipsoidal cave bounds
+                        const dist = Math.sqrt(pos.x * pos.x + pos.z * pos.z);
+                        const maxDist = 50; // Stay inside cave walls
+                        if (dist > maxDist) {
+                            const scale = maxDist / dist;
+                            pos.x *= scale;
+                            pos.z *= scale;
+                        }
+                        // Vertical bounds based on ellipsoid at current position
+                        const normDist = dist / 55;
+                        const headroom = 35 * Math.sqrt(Math.max(0, 1 - normDist * normDist));
+                        pos.y = THREE.MathUtils.clamp(pos.y, 22 - headroom + 2, 22 + headroom - 2);
                     }
                 } else {
                     // In plains - check for return to cave
-                    if (pos.x < 50 && Math.abs(pos.z) < 10 && pos.y < 20) {
+                    if (pos.x < 52 && Math.abs(pos.z) < 10 && pos.y < 25) {
                         // Transition back to cave
                         this.currentLocation = 'cave';
                         pos.x = 45;
@@ -2072,11 +2137,10 @@
                         // Clamp within plains bounds
                         pos.x = THREE.MathUtils.clamp(pos.x, 50, 450);
                         pos.z = THREE.MathUtils.clamp(pos.z, -180, 180);
+                        // Vertical bounds for plains
+                        pos.y = THREE.MathUtils.clamp(pos.y, 2, 80);
                     }
                 }
-
-                // Vertical bounds (same for both areas)
-                pos.y = THREE.MathUtils.clamp(pos.y, -2, 50);
 
                 // Update HUD
                 document.getElementById('altitude').textContent = Math.round(pos.y + 5);
@@ -2266,7 +2330,7 @@
                 this.currentLocation = 'cave';
 
                 // Reset camera position and rotation
-                this.camera.position.set(0, 5, 0);
+                this.camera.position.set(0, 12, 0);
                 this.camera.rotation.set(0, 0, 0);
 
                 // Respawn all insects
