@@ -829,7 +829,9 @@
             uniform vec3 pulseOrigins[10];
             uniform float pulseRadii[10];
             uniform float pulseIntensities[10];
-            uniform vec3 pulseDirections[10];
+            uniform float pulseDirX[10];
+            uniform float pulseDirY[10];
+            uniform float pulseDirZ[10];
             uniform float pulseHalfAngles[10];
             uniform float pulseWavefrontWidths[10];
             uniform int activePulses;
@@ -850,14 +852,17 @@
                     float pulseRadius = pulseRadii[i];
                     float intensity = pulseIntensities[i];
 
+                    // Reconstruct and normalize direction from float components
+                    vec3 pulseDir = normalize(vec3(pulseDirX[i], pulseDirY[i], pulseDirZ[i]));
+
                     // Cone-based visibility: check angle from pulse direction
                     vec3 toFrag = normalize(vWorldPosition - pulseOrigins[i]);
-                    float cosAngle = dot(toFrag, pulseDirections[i]);
+                    float cosAngle = dot(toFrag, pulseDir);
                     float halfAngle = pulseHalfAngles[i];
                     float cosHalfAngle = cos(halfAngle);
 
-                    // Soft falloff at cone edges (smooth transition)
-                    float coneFalloff = smoothstep(cosHalfAngle - 0.12, cosHalfAngle + 0.08, cosAngle);
+                    // Soft falloff at cone edges
+                    float coneFalloff = smoothstep(cosHalfAngle - 0.15, cosHalfAngle, cosAngle);
 
                     // Wave front detection with per-pulse width
                     float wfWidth = pulseWavefrontWidths[i];
@@ -867,7 +872,7 @@
                     // Residual glow (within cone only)
                     float residualGlow = 0.0;
                     if (dist < pulseRadius) {
-                        residualGlow = intensity * 0.25 * (1.0 - dist / maxPulseRadius) * coneFalloff;
+                        residualGlow = intensity * 0.3 * (1.0 - dist / maxPulseRadius) * coneFalloff;
                     }
 
                     float visibility = max(waveVisibility, residualGlow);
@@ -1036,7 +1041,9 @@
                         pulseOrigins: { value: Array.from({length: 10}, () => new THREE.Vector3()) },
                         pulseRadii: { value: new Array(10).fill(0) },
                         pulseIntensities: { value: new Array(10).fill(0) },
-                        pulseDirections: { value: Array.from({length: 10}, () => new THREE.Vector3(0, 0, -1)) },
+                        pulseDirX: { value: new Array(10).fill(0) },
+                        pulseDirY: { value: new Array(10).fill(0) },
+                        pulseDirZ: { value: new Array(10).fill(-1) },
                         pulseHalfAngles: { value: new Array(10).fill(0.44) },
                         pulseWavefrontWidths: { value: new Array(10).fill(3.0) },
                         activePulses: { value: 0 },
@@ -1655,7 +1662,9 @@
                 const origins = [];
                 const radii = [];
                 const intensities = [];
-                const directions = [];
+                const dirX = [];
+                const dirY = [];
+                const dirZ = [];
                 const halfAngles = [];
                 const wavefrontWidths = [];
 
@@ -1675,7 +1684,10 @@
                         origins.push(pulse.origin);
                         radii.push(pulse.radius);
                         intensities.push(pulse.intensity);
-                        directions.push(pulse.direction || new THREE.Vector3(0, 0, -1));
+                        const dir = pulse.direction || new THREE.Vector3(0, 0, -1);
+                        dirX.push(dir.x);
+                        dirY.push(dir.y);
+                        dirZ.push(dir.z);
                         halfAngles.push(pulse.halfAngle || 0.44); // ~25 degrees default
                         wavefrontWidths.push(pulse.wavefrontWidth || 3.0);
 
@@ -1710,7 +1722,9 @@
                         origins.push(new THREE.Vector3());
                         radii.push(0);
                         intensities.push(0);
-                        directions.push(new THREE.Vector3(0, 0, -1));
+                        dirX.push(0);
+                        dirY.push(0);
+                        dirZ.push(-1);
                         halfAngles.push(0.44);
                         wavefrontWidths.push(3.0);
                     }
@@ -1725,7 +1739,9 @@
                         obj.material.uniforms.pulseOrigins.value = origins;
                         obj.material.uniforms.pulseRadii.value = radii;
                         obj.material.uniforms.pulseIntensities.value = intensities;
-                        obj.material.uniforms.pulseDirections.value = directions;
+                        obj.material.uniforms.pulseDirX.value = dirX;
+                        obj.material.uniforms.pulseDirY.value = dirY;
+                        obj.material.uniforms.pulseDirZ.value = dirZ;
                         obj.material.uniforms.pulseHalfAngles.value = halfAngles;
                         obj.material.uniforms.pulseWavefrontWidths.value = wavefrontWidths;
                         obj.material.uniforms.activePulses.value = Math.min(this.pulses.length, this.maxPulses);
