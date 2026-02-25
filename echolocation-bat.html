@@ -201,10 +201,7 @@
         <p style="color: #ffcc00; margin-top: 10px;">
             Close objects glow warm (yellow) | Far objects appear cool (blue)
         </p>
-        <p style="color: #88aacc; font-size: 12px; margin-top: 10px;">
-            Watch a bat return to its roost, or click below to begin...
-        </p>
-        <button id="startBtn">Start Hunting</button>
+        <button id="startBtn">Enter the Cave</button>
     </div>
 
     <div id="gameOver" class="hidden">
@@ -1012,7 +1009,7 @@
                 this.insects = []; // Track insects separately for eating
 
                 // Intro flythrough state
-                this.introActive = true;
+                this.introActive = false;  // Starts after button click
                 this.introTime = 0;
                 this.introDuration = 8.0;  // Total intro duration in seconds
                 this.introLight = null;
@@ -1054,19 +1051,6 @@
                 // Create environments
                 this.createCaveEnvironment();
                 this.createPlainsEnvironment();
-
-                // Setup intro lighting (visible cave during flythrough)
-                this.introLight = new THREE.AmbientLight(0x6688aa, 0.8);
-                this.scene.add(this.introLight);
-                // Add a subtle directional light for depth
-                this.introDirectional = new THREE.DirectionalLight(0xaaccff, 0.4);
-                this.introDirectional.position.set(50, 60, 30);
-                this.scene.add(this.introDirectional);
-
-                // Set camera to intro start position
-                const startWaypoint = this.introWaypoints[0];
-                this.camera.position.copy(startWaypoint.pos);
-                this.camera.lookAt(startWaypoint.lookAt);
 
                 // Setup minimap
                 this.setupMinimap();
@@ -1904,6 +1888,33 @@
                 // Add subtle flight wobble during intro
                 const wobble = Math.sin(this.introTime * 3) * 0.02 + Math.sin(this.introTime * 5.3) * 0.01;
                 this.camera.rotation.z += wobble;
+
+                // Auto-transition to game after intro completes (with brief pause at end)
+                const finalTime = this.introWaypoints[this.introWaypoints.length - 1].time;
+                if (this.introTime >= finalTime + 1.5) {
+                    this.endIntro();
+                }
+            }
+
+            startIntro() {
+                // Hide instructions
+                document.getElementById('instructions').classList.add('hidden');
+
+                // Setup intro lighting (visible cave during flythrough)
+                this.introLight = new THREE.AmbientLight(0x6688aa, 0.8);
+                this.scene.add(this.introLight);
+                this.introDirectional = new THREE.DirectionalLight(0xaaccff, 0.4);
+                this.introDirectional.position.set(50, 60, 30);
+                this.scene.add(this.introDirectional);
+
+                // Set camera to intro start position
+                const startWaypoint = this.introWaypoints[0];
+                this.camera.position.copy(startWaypoint.pos);
+                this.camera.lookAt(startWaypoint.lookAt);
+
+                // Reset intro timer and activate
+                this.introTime = 0;
+                this.introActive = true;
             }
 
             endIntro() {
@@ -2388,9 +2399,9 @@
             }
 
             setupEventListeners() {
-                // Start button - ends intro and starts game
+                // Start button - begins intro flythrough
                 document.getElementById('startBtn').addEventListener('click', () => {
-                    this.endIntro();
+                    this.startIntro();
                 });
 
                 // Restart button
