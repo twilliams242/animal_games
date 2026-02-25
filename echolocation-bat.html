@@ -1024,19 +1024,23 @@
                 this.introTime = 0;
                 this.introDuration = 8.0;  // Total intro duration in seconds
                 this.introLight = null;
+                // Wakeup transition: bat drops from ceiling and flips right side up
+                this.wakeupActive = false;
+                this.wakeupTime = 0;
+                this.wakeupDuration = 1.2;  // seconds to flip and drop
                 this.introWaypoints = [
-                    // Start outside cave, flying in
-                    { pos: new THREE.Vector3(80, 20, 30), lookAt: new THREE.Vector3(40, 15, 0), time: 0 },
-                    // Swoop through entrance
-                    { pos: new THREE.Vector3(45, 12, 5), lookAt: new THREE.Vector3(0, 10, 0), time: 1.5 },
-                    // Glide through main cave, viewing stalactites
-                    { pos: new THREE.Vector3(10, 15, -15), lookAt: new THREE.Vector3(-20, 5, 10), time: 3.0 },
-                    // Curve around showing the cave
-                    { pos: new THREE.Vector3(-20, 20, 20), lookAt: new THREE.Vector3(10, 30, 0), time: 4.5 },
+                    // Start inside cave near entrance, looking out at the arch
+                    { pos: new THREE.Vector3(35, 12, 8), lookAt: new THREE.Vector3(48, 8, 0), time: 0 },
+                    // Turn and glide deeper into cave, viewing stalactites above
+                    { pos: new THREE.Vector3(15, 18, -10), lookAt: new THREE.Vector3(-20, 25, 5), time: 2.0 },
+                    // Swoop low past stalagmites and pool
+                    { pos: new THREE.Vector3(-15, 8, 15), lookAt: new THREE.Vector3(-30, 5, -10), time: 3.5 },
+                    // Curve around far end, looking back across the cave
+                    { pos: new THREE.Vector3(-30, 22, -20), lookAt: new THREE.Vector3(10, 30, 10), time: 5.0 },
                     // Rise toward ceiling near bat colony
-                    { pos: new THREE.Vector3(5, 45, 15), lookAt: new THREE.Vector3(15, 52, 20), time: 6.0 },
-                    // Final position: upside down on ceiling
-                    { pos: new THREE.Vector3(8, 52, 22), lookAt: new THREE.Vector3(48, 10, 0), time: 7.5, upsideDown: true }
+                    { pos: new THREE.Vector3(5, 42, 15), lookAt: new THREE.Vector3(15, 52, 20), time: 6.5 },
+                    // Final position: upside down on ceiling with the colony
+                    { pos: new THREE.Vector3(10, 52, 22), lookAt: new THREE.Vector3(35, 10, 0), time: 8.0, upsideDown: true }
                 ];
 
                 this.init();
@@ -1970,11 +1974,47 @@
                     this.introDirectional = null;
                 }
 
-                // Reset camera to game start position
-                this.camera.position.set(0, 5, 0);
-                this.camera.rotation.set(0, 0, 0);
+                // Start wakeup phase: bat drops from ceiling and flips right side up
+                this.wakeupActive = true;
+                this.wakeupTime = 0;
+                this.wakeupPulseFired = false;
+                // Camera starts at the roost position (upside down on ceiling)
+                const finalWp = this.introWaypoints[this.introWaypoints.length - 1];
+                this.camera.position.copy(finalWp.pos);
+                this.camera.lookAt(finalWp.lookAt);
+                this.camera.rotation.z = Math.PI;
+            }
 
-                // Controls already locked from startIntro(), game begins now
+            updateWakeup(delta) {
+                if (!this.wakeupActive) return;
+
+                this.wakeupTime += delta;
+                const t = Math.min(this.wakeupTime / this.wakeupDuration, 1.0);
+                // Smooth ease-out
+                const ease = 1 - (1 - t) * (1 - t);
+
+                // Drop from ceiling (y=52) to flying height (y=5)
+                const startY = 52;
+                const endY = 5;
+                this.camera.position.y = startY + (endY - startY) * ease;
+                // Drift toward center of cave
+                this.camera.position.x = 10 * (1 - ease) + 0 * ease;
+                this.camera.position.z = 22 * (1 - ease) + 0 * ease;
+
+                // Flip from upside down (PI) to right side up (0)
+                this.camera.rotation.z = Math.PI * (1 - ease);
+
+                // Fire a pulse partway through so the player can see
+                if (t > 0.5 && !this.wakeupPulseFired) {
+                    this.wakeupPulseFired = true;
+                    this.emitPulse();
+                }
+
+                if (t >= 1.0) {
+                    this.wakeupActive = false;
+                    this.camera.position.set(0, 5, 0);
+                    this.camera.rotation.z = 0;
+                }
             }
 
             updateMovement(delta) {
@@ -2519,6 +2559,14 @@
                 if (this.introActive) {
                     this.updateIntro(delta);
                     this.updateInsects(delta);  // Keep insects animated during intro
+                    this.renderer.render(this.scene, this.camera);
+                    return;
+                }
+
+                // Handle wakeup transition (bat drops from ceiling, flips right side up)
+                if (this.wakeupActive) {
+                    this.updateWakeup(delta);
+                    this.updatePulses(delta);
                     this.renderer.render(this.scene, this.camera);
                     return;
                 }
