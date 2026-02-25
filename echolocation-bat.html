@@ -224,6 +224,7 @@
         <div>Altitude: <span id="altitude">0</span>m</div>
         <div>Pulses: <span id="pulseCount">0</span></div>
         <div>Insects eaten: <span id="insectsEaten">0</span></div>
+        <div>Sonar: <span id="sonarPhase" style="color: #4a9eff;">SEARCH</span></div>
         <div style="margin-top: 10px; color: #666;">SPACE to echolocate | Fly near insects to eat</div>
     </div>
 
@@ -703,31 +704,48 @@
                 }
             }
 
-            emitChirp() {
+            emitChirp(phase = 'search') {
                 if (!this.initialized) return;
 
                 const ctx = this.audioContext;
                 const now = ctx.currentTime;
 
-                // Create ultrasonic-style chirp (frequency sweep)
+                // Phase-specific chirp parameters (based on real bat echolocation research)
+                const chirpParams = {
+                    search: {
+                        freqStart: 4000, freqEnd: 1500,
+                        duration: 0.08, gain: 0.28, type: 'sine'
+                    },
+                    approach: {
+                        freqStart: 5000, freqEnd: 2000,
+                        duration: 0.04, gain: 0.22, type: 'sine'
+                    },
+                    terminal: {
+                        freqStart: 3000, freqEnd: 1000,  // Lower freq = broader beam
+                        duration: 0.015, gain: 0.15, type: 'triangle'
+                    }
+                };
+
+                const p = chirpParams[phase] || chirpParams.search;
+
                 const oscillator = ctx.createOscillator();
                 const gainNode = ctx.createGain();
 
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(4000, now);
-                oscillator.frequency.exponentialRampToValueAtTime(1500, now + 0.08);
+                oscillator.type = p.type;
+                oscillator.frequency.setValueAtTime(p.freqStart, now);
+                oscillator.frequency.exponentialRampToValueAtTime(p.freqEnd, now + p.duration);
 
-                gainNode.gain.setValueAtTime(0.3, now);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                gainNode.gain.setValueAtTime(p.gain, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + p.duration + 0.02);
 
                 oscillator.connect(gainNode);
                 gainNode.connect(ctx.destination);
 
                 oscillator.start(now);
-                oscillator.stop(now + 0.1);
+                oscillator.stop(now + p.duration + 0.03);
             }
 
-            playEcho(objectPosition, playerPosition, distance, maxDistance) {
+            playEcho(objectPosition, playerPosition, distance, maxDistance, phase = 'search') {
                 if (!this.initialized) return;
 
                 const ctx = this.audioContext;
@@ -751,28 +769,44 @@
                 panner.positionY.setValueAtTime(objectPosition.y, now);
                 panner.positionZ.setValueAtTime(objectPosition.z, now);
 
-                // Echo sound (higher frequency for closer objects)
+                // Phase-specific echo characteristics
+                const freqRange = 1 - (distance / maxDistance);
+                let frequency, echoDuration, volume;
+
+                if (phase === 'terminal') {
+                    // Terminal: lower frequency, shorter, quieter (close range)
+                    frequency = 600 + freqRange * 800;
+                    echoDuration = 0.03;
+                    volume = Math.max(0.01, 0.22 * (1 - distance / maxDistance));
+                } else if (phase === 'approach') {
+                    // Approach: higher frequency, sharper
+                    frequency = 1000 + freqRange * 1500;
+                    echoDuration = 0.04;
+                    volume = Math.max(0.01, 0.18 * (1 - distance / maxDistance));
+                } else {
+                    // Search: original balanced values
+                    frequency = 800 + freqRange * 1200;
+                    echoDuration = 0.05;
+                    volume = Math.max(0.01, 0.2 * (1 - distance / maxDistance));
+                }
+
                 const oscillator = ctx.createOscillator();
                 const gainNode = ctx.createGain();
 
-                const freqRange = 1 - (distance / maxDistance);
-                const frequency = 800 + freqRange * 1200;
-
                 oscillator.type = 'sine';
                 oscillator.frequency.setValueAtTime(frequency, now + delay);
-                oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.5, now + delay + 0.05);
+                oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.5, now + delay + echoDuration);
 
-                const volume = Math.max(0.01, 0.2 * (1 - distance / maxDistance));
                 gainNode.gain.setValueAtTime(0, now);
                 gainNode.gain.setValueAtTime(volume, now + delay);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.08);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + delay + echoDuration + 0.03);
 
                 oscillator.connect(gainNode);
                 gainNode.connect(panner);
                 panner.connect(ctx.destination);
 
                 oscillator.start(now + delay);
-                oscillator.stop(now + delay + 0.1);
+                oscillator.stop(now + delay + echoDuration + 0.05);
             }
         }
 
@@ -795,6 +829,9 @@
             uniform vec3 pulseOrigins[10];
             uniform float pulseRadii[10];
             uniform float pulseIntensities[10];
+            uniform vec3 pulseDirections[10];
+            uniform float pulseHalfAngles[10];
+            uniform float pulseWavefrontWidths[10];
             uniform int activePulses;
             uniform float maxPulseRadius;
             uniform float time;
@@ -813,15 +850,24 @@
                     float pulseRadius = pulseRadii[i];
                     float intensity = pulseIntensities[i];
 
-                    // Wave front detection (objects glow when pulse passes through)
-                    float waveFrontWidth = 3.0;
-                    float waveDist = abs(dist - pulseRadius);
-                    float waveVisibility = smoothstep(waveFrontWidth, 0.0, waveDist) * intensity;
+                    // Cone-based visibility: check angle from pulse direction
+                    vec3 toFrag = normalize(vWorldPosition - pulseOrigins[i]);
+                    float cosAngle = dot(toFrag, pulseDirections[i]);
+                    float halfAngle = pulseHalfAngles[i];
+                    float cosHalfAngle = cos(halfAngle);
 
-                    // Residual glow (fades after wave passes)
+                    // Soft falloff at cone edges (smooth transition)
+                    float coneFalloff = smoothstep(cosHalfAngle - 0.12, cosHalfAngle + 0.08, cosAngle);
+
+                    // Wave front detection with per-pulse width
+                    float wfWidth = pulseWavefrontWidths[i];
+                    float waveDist = abs(dist - pulseRadius);
+                    float waveVisibility = smoothstep(wfWidth, 0.0, waveDist) * intensity * coneFalloff;
+
+                    // Residual glow (within cone only)
                     float residualGlow = 0.0;
                     if (dist < pulseRadius) {
-                        residualGlow = intensity * 0.3 * (1.0 - dist / maxPulseRadius);
+                        residualGlow = intensity * 0.25 * (1.0 - dist / maxPulseRadius) * coneFalloff;
                     }
 
                     float visibility = max(waveVisibility, residualGlow);
@@ -885,6 +931,51 @@
                 this.pulseSpeed = 40;
                 this.pulseCount = 0;
 
+                // Sonar phase system (based on Schnitzler, Moss & Denzinger 2003)
+                this.sonarPhase = 'search'; // 'search', 'approach', 'terminal'
+                this.trackedPrey = null;
+                this.preyDistance = Infinity;
+                this.autoPulseTimer = 0;
+                this.postBuzzPause = 0;
+                this.lastChirpTime = 0;
+
+                // Phase-specific sonar parameters (adapted from real bat data)
+                this.sonarParams = {
+                    search: {
+                        pulseInterval: 0.100,    // 100ms between pulses (10 Hz)
+                        pulseSpeed: 40,
+                        maxRadius: 80,
+                        chirpDuration: 0.080,
+                        freqStart: 4000,
+                        freqEnd: 1500,
+                        beamHalfAngle: 25,       // degrees - moderate search beam
+                        intensity: 1.0,
+                        wavefrontWidth: 3.0
+                    },
+                    approach: {
+                        pulseInterval: 0.040,    // 40ms between pulses (25 Hz)
+                        pulseSpeed: 45,
+                        maxRadius: 50,
+                        chirpDuration: 0.040,
+                        freqStart: 5000,
+                        freqEnd: 2000,
+                        beamHalfAngle: 18,       // narrower, focused on prey
+                        intensity: 0.8,
+                        wavefrontWidth: 2.5
+                    },
+                    terminal: {
+                        pulseInterval: 0.012,    // 12ms between pulses (~83 Hz)
+                        pulseSpeed: 50,
+                        maxRadius: 25,
+                        chirpDuration: 0.015,
+                        freqStart: 3000,         // frequency drops (Buzz II)
+                        freqEnd: 1000,
+                        beamHalfAngle: 40,       // wide-angle for final capture
+                        intensity: 0.6,
+                        wavefrontWidth: 2.0
+                    }
+                };
+
                 this.echoObjects = [];
                 this.echoMaterial = null;
 
@@ -945,6 +1036,9 @@
                         pulseOrigins: { value: new Array(10).fill(new THREE.Vector3()) },
                         pulseRadii: { value: new Array(10).fill(0) },
                         pulseIntensities: { value: new Array(10).fill(0) },
+                        pulseDirections: { value: new Array(10).fill(new THREE.Vector3(0, 0, -1)) },
+                        pulseHalfAngles: { value: new Array(10).fill(0.44) },
+                        pulseWavefrontWidths: { value: new Array(10).fill(3.0) },
                         activePulses: { value: 0 },
                         maxPulseRadius: { value: this.maxPulseRadius },
                         time: { value: 0 }
@@ -1438,11 +1532,20 @@
 
             emitPulse() {
                 const origin = this.camera.position.clone();
+                const direction = new THREE.Vector3();
+                this.camera.getWorldDirection(direction);
+                const params = this.getEffectiveSonarParams();
 
                 this.pulses.push({
                     origin: origin,
+                    direction: direction.clone(),
+                    halfAngle: params.beamHalfAngle * (Math.PI / 180), // radians
+                    maxRadius: params.maxRadius,
+                    wavefrontWidth: params.wavefrontWidth,
+                    pulseSpeed: params.pulseSpeed,
+                    phase: this.sonarPhase,
                     radius: 0,
-                    intensity: 1,
+                    intensity: params.intensity,
                     echoedObjects: new Set()
                 });
 
@@ -1451,45 +1554,152 @@
                     this.pulses.shift();
                 }
 
-                // Play chirp sound
-                this.audio.emitChirp();
+                // Play chirp sound with phase-appropriate parameters
+                // Throttle terminal buzz audio to avoid overwhelming
+                const now = performance.now() / 1000;
+                if (this.sonarPhase !== 'terminal' || now - this.lastChirpTime > 0.03) {
+                    this.audio.emitChirp(this.sonarPhase);
+                    this.lastChirpTime = now;
+                }
 
                 this.pulseCount++;
                 document.getElementById('pulseCount').textContent = this.pulseCount;
             }
 
+            // Get sonar parameters adjusted for current environment
+            getEffectiveSonarParams() {
+                const base = this.sonarParams[this.sonarPhase];
+                if (this.currentLocation === 'cave') {
+                    // In cluttered cave: shorter range, narrower beam, lower intensity
+                    return {
+                        ...base,
+                        maxRadius: base.maxRadius * 0.65,
+                        beamHalfAngle: base.beamHalfAngle * 0.75,
+                        intensity: base.intensity * 0.75,
+                        pulseInterval: base.pulseInterval * 0.85
+                    };
+                }
+                return base;
+            }
+
+            // Update sonar phase based on prey proximity (Schnitzler et al. 2003)
+            updateSonarPhase() {
+                if (this.gameOver || !this.controls.isLocked) return;
+
+                // Find nearest non-eaten insect
+                let nearestDist = Infinity;
+                let nearestPrey = null;
+                const playerPos = this.camera.position;
+
+                for (const insect of this.insects) {
+                    if (insect.userData.eaten) continue;
+                    const dist = playerPos.distanceTo(insect.position);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestPrey = insect;
+                    }
+                }
+
+                this.preyDistance = nearestDist;
+                this.trackedPrey = nearestPrey;
+
+                // Phase transition thresholds (with hysteresis to prevent jitter)
+                const thresholds = this.currentLocation === 'cave'
+                    ? { searchToApproach: 22, approachToTerminal: 6, terminalToApproach: 8, approachToSearch: 28 }
+                    : { searchToApproach: 30, approachToTerminal: 8, terminalToApproach: 10, approachToSearch: 38 };
+
+                const prevPhase = this.sonarPhase;
+
+                if (this.sonarPhase === 'search') {
+                    if (nearestDist < thresholds.searchToApproach) {
+                        this.sonarPhase = 'approach';
+                    }
+                } else if (this.sonarPhase === 'approach') {
+                    if (nearestDist < thresholds.approachToTerminal) {
+                        this.sonarPhase = 'terminal';
+                    } else if (nearestDist > thresholds.approachToSearch) {
+                        this.sonarPhase = 'search';
+                    }
+                } else if (this.sonarPhase === 'terminal') {
+                    if (nearestDist > thresholds.terminalToApproach) {
+                        this.sonarPhase = 'approach';
+                    }
+                }
+
+                // Update HUD phase indicator
+                const phaseEl = document.getElementById('sonarPhase');
+                if (phaseEl) {
+                    const labels = { search: 'SEARCH', approach: 'APPROACH', terminal: 'BUZZ' };
+                    const colors = { search: '#4a9eff', approach: '#ffcc00', terminal: '#ff4444' };
+                    phaseEl.textContent = labels[this.sonarPhase];
+                    phaseEl.style.color = colors[this.sonarPhase];
+                }
+
+                // Update crosshair based on beam width
+                const params = this.getEffectiveSonarParams();
+                const crosshair = document.getElementById('crosshair');
+                if (crosshair) {
+                    const size = 12 + params.beamHalfAngle * 0.8;
+                    crosshair.style.width = size + 'px';
+                    crosshair.style.height = size + 'px';
+                    const phaseColors = { search: '#4a9eff', approach: '#ffcc00', terminal: '#ff4444' };
+                    crosshair.style.borderColor = phaseColors[this.sonarPhase];
+                }
+            }
+
             updatePulses(delta) {
                 const time = this.clock.getElapsedTime();
 
-                // Update shader uniforms for all echo objects
+                // Build shader uniform arrays
                 const origins = [];
                 const radii = [];
                 const intensities = [];
+                const directions = [];
+                const halfAngles = [];
+                const wavefrontWidths = [];
+
+                const _worldPos = new THREE.Vector3();
+                const _toObj = new THREE.Vector3();
 
                 for (let i = 0; i < this.maxPulses; i++) {
                     if (i < this.pulses.length) {
                         const pulse = this.pulses[i];
-                        pulse.radius += this.pulseSpeed * delta;
-                        pulse.intensity = Math.max(0, 1 - pulse.radius / this.maxPulseRadius);
+                        // Use per-pulse speed and maxRadius
+                        pulse.radius += (pulse.pulseSpeed || this.pulseSpeed) * delta;
+                        const maxRad = pulse.maxRadius || this.maxPulseRadius;
+                        pulse.intensity = Math.max(0, pulse.intensity * (1 - pulse.radius / maxRad));
 
                         origins.push(pulse.origin);
                         radii.push(pulse.radius);
                         intensities.push(pulse.intensity);
+                        directions.push(pulse.direction || new THREE.Vector3(0, 0, -1));
+                        halfAngles.push(pulse.halfAngle || 0.44); // ~25 degrees default
+                        wavefrontWidths.push(pulse.wavefrontWidth || 3.0);
 
-                        // Check for echoes from objects
-                        const _worldPos = new THREE.Vector3();
+                        // Check for echoes from objects within the beam cone
+                        const wfWidth = pulse.wavefrontWidth || 3.0;
                         for (const obj of this.echoObjects) {
                             if (!pulse.echoedObjects.has(obj)) {
                                 obj.getWorldPosition(_worldPos);
                                 const dist = pulse.origin.distanceTo(_worldPos);
-                                if (Math.abs(dist - pulse.radius) < 3) {
-                                    pulse.echoedObjects.add(obj);
-                                    this.audio.playEcho(
-                                        _worldPos,
-                                        this.camera.position,
-                                        dist,
-                                        this.maxPulseRadius
-                                    );
+
+                                // Check if within wavefront thickness
+                                if (Math.abs(dist - pulse.radius) < wfWidth) {
+                                    // Check if within beam cone
+                                    _toObj.copy(_worldPos).sub(pulse.origin).normalize();
+                                    const cosAngle = _toObj.dot(pulse.direction);
+                                    const cosHalfAngle = Math.cos(pulse.halfAngle || 0.44);
+
+                                    if (cosAngle >= cosHalfAngle) {
+                                        pulse.echoedObjects.add(obj);
+                                        this.audio.playEcho(
+                                            _worldPos,
+                                            this.camera.position,
+                                            dist,
+                                            pulse.maxRadius || this.maxPulseRadius,
+                                            pulse.phase || 'search'
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1497,18 +1707,24 @@
                         origins.push(new THREE.Vector3());
                         radii.push(0);
                         intensities.push(0);
+                        directions.push(new THREE.Vector3(0, 0, -1));
+                        halfAngles.push(0.44);
+                        wavefrontWidths.push(3.0);
                     }
                 }
 
-                // Remove expired pulses
-                this.pulses = this.pulses.filter(p => p.radius < this.maxPulseRadius);
+                // Remove expired pulses (using per-pulse maxRadius)
+                this.pulses = this.pulses.filter(p => p.radius < (p.maxRadius || this.maxPulseRadius));
 
-                // Update all echo object materials
+                // Update all echo object materials with new uniforms
                 for (const obj of this.echoObjects) {
                     if (obj.material.uniforms) {
                         obj.material.uniforms.pulseOrigins.value = origins;
                         obj.material.uniforms.pulseRadii.value = radii;
                         obj.material.uniforms.pulseIntensities.value = intensities;
+                        obj.material.uniforms.pulseDirections.value = directions;
+                        obj.material.uniforms.pulseHalfAngles.value = halfAngles;
+                        obj.material.uniforms.pulseWavefrontWidths.value = wavefrontWidths;
                         obj.material.uniforms.activePulses.value = Math.min(this.pulses.length, this.maxPulses);
                         obj.material.uniforms.time.value = time;
                     }
@@ -1692,6 +1908,11 @@
 
                         // Play eating sound
                         this.playEatSound();
+
+                        // Post-capture pause (based on Schnitzler et al. research)
+                        this.postBuzzPause = 0.12; // 120ms silence after capture
+                        this.sonarPhase = 'search';
+                        this.trackedPrey = null;
 
                         // Respawn insect after delay
                         setTimeout(() => this.respawnInsect(insect), 5000 + Math.random() * 10000);
@@ -1923,16 +2144,45 @@
                     }
                 }
 
-                // Draw active pulse rings
+                // Draw active pulse cones (directional beam arcs)
                 for (const pulse of this.pulses) {
-                    if (pulse.intensity > 0.05) {
+                    if (pulse.intensity > 0.05 && pulse.direction) {
                         const center = this.worldToMap(pulse.origin.x, pulse.origin.z);
                         const scaleX = this.mapWidth / (this.mapBounds.maxX - this.mapBounds.minX);
                         const radius = pulse.radius * scaleX;
-                        ctx.strokeStyle = `rgba(74, 158, 255, ${pulse.intensity * 0.3})`;
+
+                        // Calculate beam direction angle (in 2D, from direction.x and direction.z)
+                        const dirAngle = Math.atan2(-pulse.direction.z, pulse.direction.x);
+                        const halfAngle = pulse.halfAngle || 0.44;
+
+                        // Phase-specific colors
+                        const phaseColors = {
+                            search: '74, 158, 255',
+                            approach: '255, 204, 0',
+                            terminal: '255, 68, 68'
+                        };
+                        const colorRGB = phaseColors[pulse.phase] || phaseColors.search;
+
+                        ctx.strokeStyle = `rgba(${colorRGB}, ${pulse.intensity * 0.4})`;
                         ctx.lineWidth = 0.5;
+
+                        // Draw arc
                         ctx.beginPath();
-                        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                        ctx.arc(center.x, center.y, radius, dirAngle - halfAngle, dirAngle + halfAngle);
+                        ctx.stroke();
+
+                        // Draw cone boundary lines
+                        ctx.beginPath();
+                        ctx.moveTo(center.x, center.y);
+                        ctx.lineTo(
+                            center.x + Math.cos(dirAngle - halfAngle) * radius,
+                            center.y - Math.sin(dirAngle - halfAngle) * radius
+                        );
+                        ctx.moveTo(center.x, center.y);
+                        ctx.lineTo(
+                            center.x + Math.cos(dirAngle + halfAngle) * radius,
+                            center.y - Math.sin(dirAngle + halfAngle) * radius
+                        );
                         ctx.stroke();
                     }
                 }
@@ -2063,8 +2313,22 @@
                 this.updatePulses(delta);
                 this.updateInsects(delta);
 
-                // Update hunger and auto-eat when game is active
+                // Update sonar phase and auto-pulse when game is active
                 if (this.controls.isLocked && !this.gameOver) {
+                    this.updateSonarPhase();
+
+                    // Auto-pulse in approach/terminal phases (based on Schnitzler et al.)
+                    if (this.postBuzzPause > 0) {
+                        this.postBuzzPause -= delta;
+                    } else if (this.sonarPhase !== 'search') {
+                        this.autoPulseTimer -= delta;
+                        if (this.autoPulseTimer <= 0) {
+                            const params = this.getEffectiveSonarParams();
+                            this.emitPulse();
+                            this.autoPulseTimer = params.pulseInterval;
+                        }
+                    }
+
                     this.updateHunger(delta);
                     this.tryEatInsect();
                     this.updateInsectSounds();
