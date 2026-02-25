@@ -920,6 +920,7 @@
 
                 this.clock = new THREE.Clock();
                 this.moveSpeed = 15;
+                this.verticalSpeed = 6;  // Slower vertical movement for finer altitude control
                 this.velocity = new THREE.Vector3();
                 this.direction = new THREE.Vector3();
 
@@ -932,7 +933,7 @@
 
                 this.pulses = [];
                 this.maxPulses = 10;
-                this.maxPulseRadius = 80;
+                this.maxPulseRadius = 140;
                 this.pulseSpeed = 40;
                 this.pulseCount = 0;
 
@@ -949,7 +950,7 @@
                     search: {
                         pulseInterval: 0.100,    // 100ms between pulses (10 Hz)
                         pulseSpeed: 40,
-                        maxRadius: 80,
+                        maxRadius: 140,
                         chirpDuration: 0.080,
                         freqStart: 4000,
                         freqEnd: 1500,
@@ -960,7 +961,7 @@
                     approach: {
                         pulseInterval: 0.040,    // 40ms between pulses (25 Hz)
                         pulseSpeed: 45,
-                        maxRadius: 50,
+                        maxRadius: 90,
                         chirpDuration: 0.040,
                         freqStart: 5000,
                         freqEnd: 2000,
@@ -971,7 +972,7 @@
                     terminal: {
                         pulseInterval: 0.012,    // 12ms between pulses (~83 Hz)
                         pulseSpeed: 50,
-                        maxRadius: 25,
+                        maxRadius: 50,
                         chirpDuration: 0.015,
                         freqStart: 3000,         // frequency drops (Buzz II)
                         freqEnd: 1000,
@@ -1015,6 +1016,7 @@
 
                 // Controls
                 this.controls = new PointerLockControls(this.camera, document.body);
+                this.controls.pointerSpeed = 0.5;  // Reduce mouse sensitivity for finer control
 
                 // Create echo material
                 this.createEchoMaterial();
@@ -1826,7 +1828,7 @@
                     this.velocity.x -= this.direction.x * this.moveSpeed * delta;
                 }
                 if (this.moveUp || this.moveDown) {
-                    this.velocity.y += this.direction.y * this.moveSpeed * delta;
+                    this.velocity.y += this.direction.y * this.verticalSpeed * delta;
                 }
 
                 this.controls.moveRight(-this.velocity.x);
