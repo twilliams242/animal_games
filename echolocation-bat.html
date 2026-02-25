@@ -931,6 +931,13 @@
                 this.moveUp = false;
                 this.moveDown = false;
 
+                // Bat flight rocking motion
+                this.rockTime = Math.random() * 100;  // Random start phase
+                this.rockAmplitude = 0.015;  // Subtle roll amplitude (radians)
+                this.rockFreq1 = 2.3;  // Primary wobble frequency
+                this.rockFreq2 = 3.7;  // Secondary wobble frequency
+                this.rockFreq3 = 1.1;  // Slow drift frequency
+
                 this.pulses = [];
                 this.maxPulses = 10;
                 this.maxPulseRadius = 140;
@@ -1879,6 +1886,23 @@
                 this.audio.updateListenerPosition(pos, forward, up);
             }
 
+            updateRocking(delta) {
+                if (!this.controls.isLocked || this.gameOver) return;
+
+                // Advance rock time
+                this.rockTime += delta;
+
+                // Layered sine waves for natural-looking wobble
+                const roll = this.rockAmplitude * (
+                    Math.sin(this.rockTime * this.rockFreq1) * 0.5 +
+                    Math.sin(this.rockTime * this.rockFreq2 + 1.3) * 0.3 +
+                    Math.sin(this.rockTime * this.rockFreq3 + 2.7) * 0.4
+                );
+
+                // Apply roll rotation to camera (z-axis tilt)
+                this.camera.rotation.z = roll;
+            }
+
             updateHunger(delta) {
                 if (this.gameOver) return;
 
@@ -2331,6 +2355,7 @@
                 const delta = Math.min(this.clock.getDelta(), 0.1);
 
                 this.updateMovement(delta);
+                this.updateRocking(delta);
                 this.updatePulses(delta);
                 this.updateInsects(delta);
 
