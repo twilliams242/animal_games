@@ -1867,13 +1867,18 @@
                     }
                 }
 
-                // If past last waypoint, stay at final position
-                if (this.introTime >= this.introWaypoints[this.introWaypoints.length - 1].time) {
-                    const finalWp = this.introWaypoints[this.introWaypoints.length - 1];
+                // If past last waypoint, stay at final position and wait for transition
+                const finalWp = this.introWaypoints[this.introWaypoints.length - 1];
+                if (this.introTime >= finalWp.time) {
                     this.camera.position.copy(finalWp.pos);
                     this.camera.lookAt(finalWp.lookAt);
                     if (finalWp.upsideDown) {
                         this.camera.rotation.z = Math.PI;
+                    }
+
+                    // Auto-transition to game after brief pause at roost
+                    if (this.introTime >= finalWp.time + 1.5) {
+                        this.endIntro();
                     }
                     return;
                 }
@@ -1900,12 +1905,6 @@
                 // Add subtle flight wobble during intro
                 const wobble = Math.sin(this.introTime * 3) * 0.02 + Math.sin(this.introTime * 5.3) * 0.01;
                 this.camera.rotation.z += wobble;
-
-                // Auto-transition to game after intro completes (with brief pause at end)
-                const finalTime = this.introWaypoints[this.introWaypoints.length - 1].time;
-                if (this.introTime >= finalTime + 1.5) {
-                    this.endIntro();
-                }
             }
 
             startIntro() {
