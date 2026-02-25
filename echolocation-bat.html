@@ -1545,6 +1545,7 @@
                     pulseSpeed: params.pulseSpeed,
                     phase: this.sonarPhase,
                     radius: 0,
+                    initialIntensity: params.intensity,
                     intensity: params.intensity,
                     echoedObjects: new Set()
                 });
@@ -1667,7 +1668,9 @@
                         // Use per-pulse speed and maxRadius
                         pulse.radius += (pulse.pulseSpeed || this.pulseSpeed) * delta;
                         const maxRad = pulse.maxRadius || this.maxPulseRadius;
-                        pulse.intensity = Math.max(0, pulse.intensity * (1 - pulse.radius / maxRad));
+                        // Linear decay: intensity decreases from initial value to 0 as radius approaches maxRad
+                        const initialIntensity = pulse.initialIntensity || 1;
+                        pulse.intensity = Math.max(0, initialIntensity * (1 - pulse.radius / maxRad));
 
                         origins.push(pulse.origin);
                         radii.push(pulse.radius);
