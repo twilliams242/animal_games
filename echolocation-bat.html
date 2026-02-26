@@ -1897,19 +1897,33 @@
                 // Remove expired pulses (using per-pulse maxRadius)
                 this.pulses = this.pulses.filter(p => p.radius < (p.maxRadius || this.maxPulseRadius));
 
+                // Helper function to update uniforms on a material
+                const updateMaterialUniforms = (material) => {
+                    if (material && material.uniforms) {
+                        material.uniforms.pulseOrigins.value = origins;
+                        material.uniforms.pulseRadii.value = radii;
+                        material.uniforms.pulseIntensities.value = intensities;
+                        material.uniforms.pulseDirX.value = dirX;
+                        material.uniforms.pulseDirY.value = dirY;
+                        material.uniforms.pulseDirZ.value = dirZ;
+                        material.uniforms.pulseHalfAngles.value = halfAngles;
+                        material.uniforms.pulseWavefrontWidths.value = wavefrontWidths;
+                        material.uniforms.activePulses.value = Math.min(this.pulses.length, this.maxPulses);
+                        material.uniforms.time.value = time;
+                    }
+                };
+
                 // Update all echo object materials with new uniforms
                 for (const obj of this.echoObjects) {
-                    if (obj.material.uniforms) {
-                        obj.material.uniforms.pulseOrigins.value = origins;
-                        obj.material.uniforms.pulseRadii.value = radii;
-                        obj.material.uniforms.pulseIntensities.value = intensities;
-                        obj.material.uniforms.pulseDirX.value = dirX;
-                        obj.material.uniforms.pulseDirY.value = dirY;
-                        obj.material.uniforms.pulseDirZ.value = dirZ;
-                        obj.material.uniforms.pulseHalfAngles.value = halfAngles;
-                        obj.material.uniforms.pulseWavefrontWidths.value = wavefrontWidths;
-                        obj.material.uniforms.activePulses.value = Math.min(this.pulses.length, this.maxPulses);
-                        obj.material.uniforms.time.value = time;
+                    // Handle Groups by updating all children
+                    if (obj.isGroup) {
+                        obj.traverse((child) => {
+                            if (child.isMesh) {
+                                updateMaterialUniforms(child.material);
+                            }
+                        });
+                    } else if (obj.material) {
+                        updateMaterialUniforms(obj.material);
                     }
                 }
             }
@@ -2090,12 +2104,21 @@
                 this.introActive = true;
 
                 // Enable intro mode on all echo objects (makes them visible)
+                const enableIntroMode = (material) => {
+                    if (material && material.uniforms) {
+                        material.uniforms.introMode.value = 1.0;
+                        material.blending = THREE.NormalBlending;
+                        material.depthWrite = true;
+                        material.needsUpdate = true;
+                    }
+                };
                 for (const obj of this.echoObjects) {
-                    if (obj.material && obj.material.uniforms) {
-                        obj.material.uniforms.introMode.value = 1.0;
-                        obj.material.blending = THREE.NormalBlending;
-                        obj.material.depthWrite = true;
-                        obj.material.needsUpdate = true;
+                    if (obj.isGroup) {
+                        obj.traverse((child) => {
+                            if (child.isMesh) enableIntroMode(child.material);
+                        });
+                    } else if (obj.material) {
+                        enableIntroMode(obj.material);
                     }
                 }
             }
@@ -2106,12 +2129,21 @@
                 this.introActive = false;
 
                 // Disable intro mode on all echo objects (back to echolocation rendering)
+                const disableIntroMode = (material) => {
+                    if (material && material.uniforms) {
+                        material.uniforms.introMode.value = 0.0;
+                        material.blending = THREE.AdditiveBlending;
+                        material.depthWrite = false;
+                        material.needsUpdate = true;
+                    }
+                };
                 for (const obj of this.echoObjects) {
-                    if (obj.material && obj.material.uniforms) {
-                        obj.material.uniforms.introMode.value = 0.0;
-                        obj.material.blending = THREE.AdditiveBlending;
-                        obj.material.depthWrite = false;
-                        obj.material.needsUpdate = true;
+                    if (obj.isGroup) {
+                        obj.traverse((child) => {
+                            if (child.isMesh) disableIntroMode(child.material);
+                        });
+                    } else if (obj.material) {
+                        disableIntroMode(obj.material);
                     }
                 }
 
