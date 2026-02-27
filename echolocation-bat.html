@@ -1549,27 +1549,6 @@
                         speed: 0.5 + Math.random() * 1.5
                     });
                 }
-
-                // Cave entrance/exit (glowing arch on the east side)
-                const entranceGroup = new THREE.Group();
-
-                // Entrance arch
-                const archGeometry = new THREE.TorusGeometry(8, 1.5, 8, 16, Math.PI);
-                const archMesh = new THREE.Mesh(archGeometry, this.echoMaterial.clone());
-                archMesh.rotation.x = Math.PI / 2;
-                archMesh.rotation.z = Math.PI / 2;
-                archMesh.position.set(48, 8, 0);
-                this.scene.add(archMesh);
-                this.echoObjects.push(archMesh);
-
-                // Entrance pillars
-                for (let side = -1; side <= 1; side += 2) {
-                    const pillarGeometry = new THREE.CylinderGeometry(1.5, 1.5, 16, 8);
-                    const pillarMesh = new THREE.Mesh(pillarGeometry, this.echoMaterial.clone());
-                    pillarMesh.position.set(48, 3, side * 8);
-                    this.scene.add(pillarMesh);
-                    this.echoObjects.push(pillarMesh);
-                }
             }
 
             createPlainsEnvironment() {
