@@ -2203,45 +2203,62 @@
             updateMovement(delta) {
                 if (!this.controls.isLocked || this.gameOver) return;
 
-                const damping = 5;
-                this.velocity.x -= this.velocity.x * damping * delta;
-                this.velocity.y -= this.velocity.y * damping * delta;
-                this.velocity.z -= this.velocity.z * damping * delta;
-
                 // Get camera's actual facing direction (includes pitch)
                 const forward = new THREE.Vector3();
                 this.camera.getWorldDirection(forward);
 
-                // Get right vector (perpendicular to forward, horizontal)
+                // Get right vector (perpendicular to forward in the horizontal plane)
+                // Using world up to keep strafing horizontal (no roll in bat flight)
+                const worldUp = new THREE.Vector3(0, 1, 0);
                 const right = new THREE.Vector3();
-                right.crossVectors(forward, this.camera.up).normalize();
+                right.crossVectors(forward, worldUp).normalize();
 
-                // Apply forward/backward movement in the direction camera is facing
+                // Get "up" relative to camera (perpendicular to both forward and right)
+                const cameraUp = new THREE.Vector3();
+                cameraUp.crossVectors(right, forward).normalize();
+
+                // Calculate desired movement direction based on input
+                const moveDir = new THREE.Vector3(0, 0, 0);
+
+                // W/S: Move in the direction camera is facing (true 3D)
                 if (this.moveForward) {
-                    this.velocity.add(forward.clone().multiplyScalar(this.moveSpeed * delta));
+                    moveDir.add(forward);
                 }
                 if (this.moveBackward) {
-                    this.velocity.add(forward.clone().multiplyScalar(-this.moveSpeed * delta));
+                    moveDir.sub(forward);
                 }
 
-                // Strafe left/right (horizontal only)
+                // A/D: Strafe left/right (horizontal)
                 if (this.moveRight) {
-                    this.velocity.add(right.clone().multiplyScalar(this.moveSpeed * delta));
+                    moveDir.add(right);
                 }
                 if (this.moveLeft) {
-                    this.velocity.add(right.clone().multiplyScalar(-this.moveSpeed * delta));
+                    moveDir.sub(right);
                 }
 
-                // Additional vertical boost with Q/E
+                // Q/E: Move along camera's up axis (perpendicular to view)
                 if (this.moveUp) {
-                    this.velocity.y += this.verticalSpeed * delta;
+                    moveDir.add(cameraUp);
                 }
                 if (this.moveDown) {
-                    this.velocity.y -= this.verticalSpeed * delta;
+                    moveDir.sub(cameraUp);
                 }
 
-                // Apply velocity directly to camera position
-                this.camera.position.add(this.velocity);
+                // Normalize to prevent faster diagonal movement
+                if (moveDir.length() > 0) {
+                    moveDir.normalize();
+                }
+
+                // Apply acceleration toward desired direction
+                const acceleration = this.moveSpeed * delta;
+                this.velocity.add(moveDir.multiplyScalar(acceleration));
+
+                // Apply damping (air resistance)
+                const damping = 1 - (5 * delta);
+                this.velocity.multiplyScalar(Math.max(0, damping));
+
+                // Apply velocity to position
+                this.camera.position.add(this.velocity.clone().multiplyScalar(delta * 60));
 
                 // Handle location transitions and bounds
                 const pos = this.camera.position;
@@ -2289,10 +2306,10 @@
                 document.getElementById('altitude').textContent = Math.round(pos.y + 5);
 
                 // Update audio listener position
-                const forward = new THREE.Vector3();
-                const up = new THREE.Vector3(0, 1, 0);
-                this.camera.getWorldDirection(forward);
-                this.audio.updateListenerPosition(pos, forward, up);
+                const audioForward = new THREE.Vector3();
+                const audioUp = new THREE.Vector3(0, 1, 0);
+                this.camera.getWorldDirection(audioForward);
+                this.audio.updateListenerPosition(pos, audioForward, audioUp);
             }
 
             updateRocking(delta) {
