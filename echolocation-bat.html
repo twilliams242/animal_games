@@ -2208,24 +2208,40 @@
                 this.velocity.y -= this.velocity.y * damping * delta;
                 this.velocity.z -= this.velocity.z * damping * delta;
 
-                this.direction.z = Number(this.moveForward) - Number(this.moveBackward);
-                this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
-                this.direction.y = Number(this.moveUp) - Number(this.moveDown);
-                this.direction.normalize();
+                // Get camera's actual facing direction (includes pitch)
+                const forward = new THREE.Vector3();
+                this.camera.getWorldDirection(forward);
 
-                if (this.moveForward || this.moveBackward) {
-                    this.velocity.z -= this.direction.z * this.moveSpeed * delta;
+                // Get right vector (perpendicular to forward, horizontal)
+                const right = new THREE.Vector3();
+                right.crossVectors(forward, this.camera.up).normalize();
+
+                // Apply forward/backward movement in the direction camera is facing
+                if (this.moveForward) {
+                    this.velocity.add(forward.clone().multiplyScalar(this.moveSpeed * delta));
                 }
-                if (this.moveLeft || this.moveRight) {
-                    this.velocity.x -= this.direction.x * this.moveSpeed * delta;
-                }
-                if (this.moveUp || this.moveDown) {
-                    this.velocity.y += this.direction.y * this.verticalSpeed * delta;
+                if (this.moveBackward) {
+                    this.velocity.add(forward.clone().multiplyScalar(-this.moveSpeed * delta));
                 }
 
-                this.controls.moveRight(-this.velocity.x);
-                this.controls.moveForward(-this.velocity.z);
-                this.camera.position.y += this.velocity.y;
+                // Strafe left/right (horizontal only)
+                if (this.moveRight) {
+                    this.velocity.add(right.clone().multiplyScalar(this.moveSpeed * delta));
+                }
+                if (this.moveLeft) {
+                    this.velocity.add(right.clone().multiplyScalar(-this.moveSpeed * delta));
+                }
+
+                // Additional vertical boost with Q/E
+                if (this.moveUp) {
+                    this.velocity.y += this.verticalSpeed * delta;
+                }
+                if (this.moveDown) {
+                    this.velocity.y -= this.verticalSpeed * delta;
+                }
+
+                // Apply velocity directly to camera position
+                this.camera.position.add(this.velocity);
 
                 // Handle location transitions and bounds
                 const pos = this.camera.position;
