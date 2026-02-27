@@ -1056,9 +1056,40 @@
                 // Camera position (start in the cave)
                 this.camera.position.set(0, 12, 0);
 
-                // Controls
+                // Controls - use PointerLockControls for lock/unlock state management
                 this.controls = new PointerLockControls(this.camera, document.body);
-                this.controls.pointerSpeed = 0.5;  // Reduce mouse sensitivity for finer control
+
+                // Custom mouse handling that accounts for camera roll
+                // Intercept mouse events before PointerLockControls processes them
+                this.mouseSpeedX = 0.002;
+                this.mouseSpeedY = 0.002;
+                document.addEventListener('mousemove', (event) => {
+                    if (!this.controls.isLocked) return;
+
+                    const movementX = event.movementX || 0;
+                    const movementY = event.movementY || 0;
+
+                    // Get current roll angle
+                    const roll = this.camera.rotation.z;
+                    const cosRoll = Math.cos(roll);
+                    const sinRoll = Math.sin(roll);
+
+                    // Rotate the mouse input by the inverse of the camera roll
+                    // This makes mouse movement feel correct regardless of roll
+                    const adjustedX = movementX * cosRoll + movementY * sinRoll;
+                    const adjustedY = movementY * cosRoll - movementX * sinRoll;
+
+                    // Apply rotation (Euler order is YXZ for typical FPS camera)
+                    // Yaw (Y rotation) - horizontal mouse movement
+                    this.camera.rotation.y -= adjustedX * this.mouseSpeedX;
+
+                    // Pitch (X rotation) - vertical mouse movement, clamped
+                    this.camera.rotation.x -= adjustedY * this.mouseSpeedY;
+                    this.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.x));
+
+                    // Stop PointerLockControls from also handling this event
+                    event.stopImmediatePropagation();
+                }, { capture: true });
 
                 // Create echo material
                 this.createEchoMaterial();
@@ -2157,48 +2188,17 @@
                     this.introDirectional = null;
                 }
 
-                // Start wakeup phase: bat drops from ceiling and flips right side up
-                this.wakeupActive = true;
-                this.wakeupTime = 0;
-                this.wakeupPulseFired = false;
-                // Camera starts at the roost position (upside down on ceiling)
-                const finalWp = this.introWaypoints[this.introWaypoints.length - 1];
-                this.camera.position.copy(finalWp.pos);
-                this.camera.lookAt(finalWp.lookAt);
-                this.camera.rotation.z = Math.PI;
+                // Skip wakeup animation - start gameplay immediately at level position
+                this.camera.position.set(0, 12, 0);
+                this.camera.rotation.z = 0;
+
+                // Fire initial pulse so player can see
+                this.emitPulse();
             }
 
             updateWakeup(delta) {
-                if (!this.wakeupActive) return;
-
-                this.wakeupTime += delta;
-                const t = Math.min(this.wakeupTime / this.wakeupDuration, 1.0);
-                // Smooth ease-out
-                const ease = 1 - (1 - t) * (1 - t);
-
-                // Drop from domed ceiling to flying height
-                const startY = 54;
-                const endY = 12;
-                this.camera.position.y = startY + (endY - startY) * ease;
-                // Drift toward center of cave
-                this.camera.position.x = 10 * (1 - ease) + 0 * ease;
-                this.camera.position.z = 8 * (1 - ease) + 0 * ease;
-
-                // Flip from upside down (PI) to right side up (0)
-                this.camera.rotation.z = Math.PI * (1 - ease);
-
-                // Fire a pulse partway through so the player can see
-                if (t > 0.5 && !this.wakeupPulseFired) {
-                    this.wakeupPulseFired = true;
-                    this.emitPulse();
-                }
-
-                if (t >= 1.0) {
-                    this.wakeupActive = false;
-                    this.camera.position.set(0, 12, 0);
-                    this.camera.rotation.z = 0;
-                }
-            }
+                // Wakeup phase disabled - gameplay starts level
+                return;
 
             updateMovement(delta) {
                 if (!this.controls.isLocked || this.gameOver) return;
@@ -2810,15 +2810,21 @@
                 if (this.controls.isLocked && !this.gameOver) {
                     this.updateSonarPhase();
 
-                    // Auto-pulse in approach/terminal phases (based on Schnitzler et al.)
+                    // Auto-pulse in all phases
+                    // Search: 1 second intervals, Approach/Terminal: faster based on params
                     if (this.postBuzzPause > 0) {
                         this.postBuzzPause -= delta;
-                    } else if (this.sonarPhase !== 'search') {
+                    } else {
                         this.autoPulseTimer -= delta;
                         if (this.autoPulseTimer <= 0) {
-                            const params = this.getEffectiveSonarParams();
                             this.emitPulse();
-                            this.autoPulseTimer = params.pulseInterval;
+                            // Use 1 second for search, otherwise use phase-specific interval
+                            if (this.sonarPhase === 'search') {
+                                this.autoPulseTimer = 1.0;
+                            } else {
+                                const params = this.getEffectiveSonarParams();
+                                this.autoPulseTimer = params.pulseInterval;
+                            }
                         }
                     }
 
