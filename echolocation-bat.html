@@ -1028,22 +1028,36 @@
                 this.wakeupActive = false;
                 this.wakeupTime = 0;
                 this.wakeupDuration = 1.2;  // seconds to flip and drop
-                this.introWaypoints = [
-                    // Start outside in the plains, approaching the cave entrance
-                    { pos: new THREE.Vector3(120, 20, 30), lookAt: new THREE.Vector3(50, 15, 0), time: 0 },
-                    // Swoop down toward the cave entrance
-                    { pos: new THREE.Vector3(75, 12, 10), lookAt: new THREE.Vector3(50, 10, 0), time: 2.0 },
-                    // Fly through the entrance into the cave
-                    { pos: new THREE.Vector3(45, 12, 0), lookAt: new THREE.Vector3(0, 20, 0), time: 3.5 },
-                    // Glide deeper, viewing the curved ceiling and stalactites
-                    { pos: new THREE.Vector3(10, 25, -10), lookAt: new THREE.Vector3(-20, 35, 5), time: 5.0 },
-                    // Swoop low past stalagmites and pool
-                    { pos: new THREE.Vector3(-15, 8, 10), lookAt: new THREE.Vector3(-25, 5, -10), time: 6.5 },
-                    // Rise toward domed ceiling near bat colony
-                    { pos: new THREE.Vector3(0, 40, 5), lookAt: new THREE.Vector3(10, 50, 8), time: 8.0 },
-                    // Final position: hanging near the bat colony on the ceiling
-                    { pos: new THREE.Vector3(10, 52, 8), lookAt: new THREE.Vector3(30, 20, 0), time: 9.5, upsideDown: true }
+                // Define path points for smooth Catmull-Rom curves
+                this.introPathPoints = [
+                    new THREE.Vector3(120, 20, 30),   // 0: Start outside
+                    new THREE.Vector3(90, 15, 15),    // 1: Approach
+                    new THREE.Vector3(65, 12, 5),     // 2: Near entrance
+                    new THREE.Vector3(40, 15, 0),     // 3: Through entrance
+                    new THREE.Vector3(20, 22, -5),    // 4: Inside cave
+                    new THREE.Vector3(5, 28, -12),    // 5: Deeper in
+                    new THREE.Vector3(-10, 20, 0),    // 6: Center area
+                    new THREE.Vector3(-5, 12, 10),    // 7: Low sweep
+                    new THREE.Vector3(5, 25, 8),      // 8: Rising
+                    new THREE.Vector3(8, 40, 6),      // 9: Near ceiling
+                    new THREE.Vector3(10, 52, 8)      // 10: Final roost
                 ];
+                this.introLookAtPoints = [
+                    new THREE.Vector3(50, 15, 0),     // Look toward cave
+                    new THREE.Vector3(40, 15, 0),
+                    new THREE.Vector3(20, 18, 0),
+                    new THREE.Vector3(0, 22, 0),
+                    new THREE.Vector3(-10, 25, -5),
+                    new THREE.Vector3(-15, 22, 0),
+                    new THREE.Vector3(-20, 15, 5),
+                    new THREE.Vector3(0, 20, 0),
+                    new THREE.Vector3(10, 45, 8),
+                    new THREE.Vector3(10, 52, 8),
+                    new THREE.Vector3(30, 20, 0)      // Look down from roost
+                ];
+                // Create smooth curves from points
+                this.introPathCurve = new THREE.CatmullRomCurve3(this.introPathPoints);
+                this.introLookAtCurve = new THREE.CatmullRomCurve3(this.introLookAtPoints);
 
                 this.init();
             }
@@ -1201,23 +1215,31 @@
                 // Scale to make it wider than tall (cavern shape)
                 caveGeometry.scale(1.0, caveHeight / caveRadius, 1.0);
 
-                // Add organic irregularity to vertices AND create entrance opening
+                // Add organic irregularity to vertices AND create entrance tunnel
                 const positions = caveGeometry.attributes.position.array;
+                const entranceDir = new THREE.Vector3(1, -0.2, 0).normalize(); // Tunnel direction (slightly downward)
+                const entranceCenter = new THREE.Vector3(0, -5, 0); // Center of entrance in geometry coords
+                const tunnelRadius = 22; // Wide tunnel
+
                 for (let i = 0; i < positions.length; i += 3) {
                     const x = positions[i];
                     const y = positions[i + 1];
                     const z = positions[i + 2];
+                    const vertex = new THREE.Vector3(x, y, z);
 
-                    // Check if vertex is in entrance region (positive X side)
-                    // Cave is centered at world (0, 22, 0), camera enters around world Y=12 (geometry Y=-10)
-                    // Make a large opening: X > 25, Y from -25 to 10 (world Y: -3 to 32), Z within ±18
-                    const inEntranceX = x > 25;
-                    const inEntranceY = y > -25 && y < 10;
-                    const inEntranceZ = Math.abs(z) < 18;
+                    // Check if vertex is in the entrance tunnel region
+                    // Project vertex onto entrance direction to see if it's on the +X side
+                    const toVertex = vertex.clone().sub(entranceCenter);
+                    const alongTunnel = toVertex.dot(entranceDir);
 
-                    if (inEntranceX && inEntranceY && inEntranceZ) {
-                        // Push entrance vertices way out to create opening
-                        positions[i] = 200;  // Push far away to effectively remove
+                    // Get perpendicular distance from tunnel axis
+                    const onAxis = entranceDir.clone().multiplyScalar(alongTunnel).add(entranceCenter);
+                    const perpDist = vertex.distanceTo(onAxis);
+
+                    // If vertex is in front (positive X direction) and within tunnel radius, remove it
+                    if (alongTunnel > 15 && perpDist < tunnelRadius) {
+                        // Push far away to create opening
+                        positions[i] = 300;
                         positions[i + 1] = y;
                         positions[i + 2] = z;
                     } else {
@@ -2063,97 +2085,51 @@
                 }
             }
 
-            // Catmull-Rom spline interpolation for smooth curves
-            catmullRom(p0, p1, p2, p3, t) {
-                const t2 = t * t;
-                const t3 = t2 * t;
-                return new THREE.Vector3(
-                    0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-                    0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
-                    0.5 * ((2 * p1.z) + (-p0.z + p2.z) * t + (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 + (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3)
-                );
-            }
-
             updateIntro(delta) {
                 if (!this.introActive) return;
 
                 this.introTime += delta;
 
-                // Find current segment (between which two waypoints we are)
-                let segmentIndex = 0;
-                let segmentStart = 0;
-
-                for (let i = 0; i < this.introWaypoints.length - 1; i++) {
-                    if (this.introTime >= this.introWaypoints[i].time &&
-                        this.introTime < this.introWaypoints[i + 1].time) {
-                        segmentIndex = i;
-                        segmentStart = this.introWaypoints[i].time;
-                        break;
-                    }
-                }
-
-                // If past last waypoint, stay at final position and wait for transition
-                const finalWp = this.introWaypoints[this.introWaypoints.length - 1];
-                if (this.introTime >= finalWp.time) {
-                    this.camera.position.copy(finalWp.pos);
-                    this.camera.lookAt(finalWp.lookAt);
-                    if (finalWp.upsideDown) {
-                        this.camera.rotation.z = Math.PI;
-                    }
+                // If past intro duration, stay at final position and wait for transition
+                if (this.introTime >= this.introDuration) {
+                    const finalPos = this.introPathCurve.getPoint(1);
+                    const finalLookAt = this.introLookAtCurve.getPoint(1);
+                    this.camera.position.copy(finalPos);
+                    this.camera.lookAt(finalLookAt);
+                    this.camera.rotation.z = Math.PI;  // Upside down
 
                     // Auto-transition to game after brief pause at roost
-                    if (this.introTime >= finalWp.time + 1.5) {
+                    if (this.introTime >= this.introDuration + 1.5) {
                         this.endIntro();
                     }
                     return;
                 }
 
-                // Get 4 control points for Catmull-Rom spline (p0, p1, p2, p3)
-                // Clamp indices to valid range
-                const n = this.introWaypoints.length;
-                const i0 = Math.max(0, segmentIndex - 1);
-                const i1 = segmentIndex;
-                const i2 = Math.min(n - 1, segmentIndex + 1);
-                const i3 = Math.min(n - 1, segmentIndex + 2);
+                // Calculate smooth progress along curve (0 to 1)
+                const rawProgress = this.introTime / this.introDuration;
 
-                const p0 = this.introWaypoints[i0].pos;
-                const p1 = this.introWaypoints[i1].pos;
-                const p2 = this.introWaypoints[i2].pos;
-                const p3 = this.introWaypoints[i3].pos;
+                // Apply easing for natural acceleration/deceleration
+                // Use sine easing for smooth start and end
+                const progress = 0.5 - 0.5 * Math.cos(rawProgress * Math.PI);
 
-                // Same for look-at targets
-                const l0 = this.introWaypoints[i0].lookAt;
-                const l1 = this.introWaypoints[i1].lookAt;
-                const l2 = this.introWaypoints[i2].lookAt;
-                const l3 = this.introWaypoints[i3].lookAt;
+                // Get position and look-at from smooth curves
+                const pos = this.introPathCurve.getPoint(progress);
+                const lookAt = this.introLookAtCurve.getPoint(progress);
 
-                // Calculate segment progress with smoothstep for even smoother feel
-                const segmentDuration = this.introWaypoints[i2].time - this.introWaypoints[i1].time;
-                const rawT = (this.introTime - segmentStart) / segmentDuration;
-                const t = rawT * rawT * (3 - 2 * rawT);  // Smoothstep
+                this.camera.position.copy(pos);
+                this.camera.lookAt(lookAt);
 
-                // Interpolate position using Catmull-Rom spline
-                this.camera.position.copy(this.catmullRom(p0, p1, p2, p3, t));
-
-                // Interpolate look-at target using Catmull-Rom spline
-                const lookTarget = this.catmullRom(l0, l1, l2, l3, t);
-                this.camera.lookAt(lookTarget);
-
-                // Handle upside-down transition for final waypoint
-                const nextWp = this.introWaypoints[i2];
-                if (nextWp.upsideDown) {
-                    // Smooth transition to upside down over the last two segments
-                    const totalProgress = this.introTime / finalWp.time;
-                    const flipStart = 0.7;  // Start flipping at 70% through intro
-                    if (totalProgress > flipStart) {
-                        const flipProgress = (totalProgress - flipStart) / (1 - flipStart);
-                        const smoothFlip = flipProgress * flipProgress * (3 - 2 * flipProgress);
-                        this.camera.rotation.z = smoothFlip * Math.PI;
-                    }
+                // Smooth upside-down rotation in the last 25% of the journey
+                const flipStart = 0.75;
+                if (rawProgress > flipStart) {
+                    const flipProgress = (rawProgress - flipStart) / (1 - flipStart);
+                    // Use smooth sine curve for natural flip
+                    const smoothFlip = 0.5 - 0.5 * Math.cos(flipProgress * Math.PI);
+                    this.camera.rotation.z = smoothFlip * Math.PI;
                 }
 
-                // Add very subtle flight wobble during intro
-                const wobble = Math.sin(this.introTime * 2) * 0.01 + Math.sin(this.introTime * 3.7) * 0.005;
+                // Very subtle flight wobble
+                const wobble = Math.sin(this.introTime * 1.5) * 0.008;
                 this.camera.rotation.z += wobble;
             }
 
@@ -2175,10 +2151,9 @@
                 this.introDirectional.position.set(50, 60, 30);
                 this.scene.add(this.introDirectional);
 
-                // Set camera to intro start position
-                const startWaypoint = this.introWaypoints[0];
-                this.camera.position.copy(startWaypoint.pos);
-                this.camera.lookAt(startWaypoint.lookAt);
+                // Set camera to intro start position (beginning of curves)
+                this.camera.position.copy(this.introPathCurve.getPoint(0));
+                this.camera.lookAt(this.introLookAtCurve.getPoint(0));
 
                 // Reset intro timer and activate
                 this.introTime = 0;
