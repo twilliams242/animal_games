@@ -1029,35 +1029,42 @@
                 this.wakeupTime = 0;
                 this.wakeupDuration = 1.2;  // seconds to flip and drop
                 // Define path points for smooth Catmull-Rom curves
+                // More points = smoother curve, especially for complex maneuvers
                 this.introPathPoints = [
                     new THREE.Vector3(120, 20, 30),   // 0: Start outside
-                    new THREE.Vector3(90, 15, 15),    // 1: Approach
-                    new THREE.Vector3(65, 12, 5),     // 2: Near entrance
-                    new THREE.Vector3(40, 15, 0),     // 3: Through entrance
-                    new THREE.Vector3(20, 22, -5),    // 4: Inside cave
-                    new THREE.Vector3(5, 28, -12),    // 5: Deeper in
-                    new THREE.Vector3(-10, 20, 0),    // 6: Center area
-                    new THREE.Vector3(-5, 12, 10),    // 7: Low sweep
-                    new THREE.Vector3(5, 25, 8),      // 8: Rising
-                    new THREE.Vector3(8, 40, 6),      // 9: Near ceiling
-                    new THREE.Vector3(10, 52, 8)      // 10: Final roost
+                    new THREE.Vector3(95, 16, 18),    // 1: Approach
+                    new THREE.Vector3(70, 13, 8),     // 2: Near entrance
+                    new THREE.Vector3(45, 14, 2),     // 3: Entering
+                    new THREE.Vector3(25, 18, -3),    // 4: Inside cave
+                    new THREE.Vector3(8, 24, -8),     // 5: Deeper in
+                    new THREE.Vector3(-8, 22, -4),    // 6: Center area
+                    new THREE.Vector3(-12, 16, 6),    // 7: Low sweep
+                    new THREE.Vector3(-4, 14, 10),    // 8: Low point
+                    new THREE.Vector3(4, 22, 8),      // 9: Rising gently
+                    new THREE.Vector3(6, 32, 7),      // 10: Mid ascent
+                    new THREE.Vector3(8, 42, 7.5),    // 11: Upper ascent
+                    new THREE.Vector3(10, 50, 8),     // 12: Near ceiling
+                    new THREE.Vector3(10, 52, 8)      // 13: Final roost
                 ];
                 this.introLookAtPoints = [
                     new THREE.Vector3(50, 15, 0),     // Look toward cave
-                    new THREE.Vector3(40, 15, 0),
+                    new THREE.Vector3(35, 16, 0),
                     new THREE.Vector3(20, 18, 0),
-                    new THREE.Vector3(0, 22, 0),
-                    new THREE.Vector3(-10, 25, -5),
-                    new THREE.Vector3(-15, 22, 0),
-                    new THREE.Vector3(-20, 15, 5),
-                    new THREE.Vector3(0, 20, 0),
-                    new THREE.Vector3(10, 45, 8),
-                    new THREE.Vector3(10, 52, 8),
-                    new THREE.Vector3(30, 20, 0)      // Look down from roost
+                    new THREE.Vector3(5, 20, 0),
+                    new THREE.Vector3(-5, 22, -3),
+                    new THREE.Vector3(-10, 22, 0),
+                    new THREE.Vector3(-15, 18, 4),
+                    new THREE.Vector3(-8, 16, 8),
+                    new THREE.Vector3(0, 18, 8),
+                    new THREE.Vector3(6, 28, 8),
+                    new THREE.Vector3(8, 38, 8),
+                    new THREE.Vector3(10, 48, 8),
+                    new THREE.Vector3(12, 52, 8),
+                    new THREE.Vector3(30, 25, 0)      // Look down from roost
                 ];
-                // Create smooth curves from points
-                this.introPathCurve = new THREE.CatmullRomCurve3(this.introPathPoints);
-                this.introLookAtCurve = new THREE.CatmullRomCurve3(this.introLookAtPoints);
+                // Create smooth curves from points with centripetal parameterization for even smoother motion
+                this.introPathCurve = new THREE.CatmullRomCurve3(this.introPathPoints, false, 'centripetal');
+                this.introLookAtCurve = new THREE.CatmullRomCurve3(this.introLookAtPoints, false, 'centripetal');
 
                 this.init();
             }
@@ -1215,31 +1222,27 @@
                 // Scale to make it wider than tall (cavern shape)
                 caveGeometry.scale(1.0, caveHeight / caveRadius, 1.0);
 
-                // Add organic irregularity to vertices AND create entrance tunnel
+                // Add organic irregularity to vertices AND create entrance opening
                 const positions = caveGeometry.attributes.position.array;
-                const entranceDir = new THREE.Vector3(1, -0.2, 0).normalize(); // Tunnel direction (slightly downward)
-                const entranceCenter = new THREE.Vector3(0, -5, 0); // Center of entrance in geometry coords
-                const tunnelRadius = 22; // Wide tunnel
 
                 for (let i = 0; i < positions.length; i += 3) {
                     const x = positions[i];
                     const y = positions[i + 1];
                     const z = positions[i + 2];
-                    const vertex = new THREE.Vector3(x, y, z);
 
-                    // Check if vertex is in the entrance tunnel region
-                    // Project vertex onto entrance direction to see if it's on the +X side
-                    const toVertex = vertex.clone().sub(entranceCenter);
-                    const alongTunnel = toVertex.dot(entranceDir);
+                    // Simple cone-shaped opening on +X side
+                    // Camera enters around geometry Y = -7 to -10 (world Y 12-15, cave at Y=22)
+                    // Remove vertices that point mostly in +X direction
+                    const distFromCenter = Math.sqrt(x * x + y * y + z * z);
+                    const xRatio = x / distFromCenter;  // How much vertex points in +X direction
 
-                    // Get perpendicular distance from tunnel axis
-                    const onAxis = entranceDir.clone().multiplyScalar(alongTunnel).add(entranceCenter);
-                    const perpDist = vertex.distanceTo(onAxis);
+                    // Opening: vertex points mostly +X (xRatio > 0.5) and Y is in lower half (y < 5)
+                    // This creates a wide mouth on the +X side of the cave
+                    const inOpening = xRatio > 0.45 && y < 8 && Math.abs(z) < 30;
 
-                    // If vertex is in front (positive X direction) and within tunnel radius, remove it
-                    if (alongTunnel > 15 && perpDist < tunnelRadius) {
-                        // Push far away to create opening
-                        positions[i] = 300;
+                    if (inOpening) {
+                        // Remove by pushing far away
+                        positions[i] = 500;
                         positions[i + 1] = y;
                         positions[i + 2] = z;
                     } else {
@@ -2090,47 +2093,38 @@
 
                 this.introTime += delta;
 
-                // If past intro duration, stay at final position and wait for transition
-                if (this.introTime >= this.introDuration) {
-                    const finalPos = this.introPathCurve.getPoint(1);
-                    const finalLookAt = this.introLookAtCurve.getPoint(1);
-                    this.camera.position.copy(finalPos);
-                    this.camera.lookAt(finalLookAt);
-                    this.camera.rotation.z = Math.PI;  // Upside down
-
-                    // Auto-transition to game after brief pause at roost
-                    if (this.introTime >= this.introDuration + 1.5) {
-                        this.endIntro();
-                    }
-                    return;
-                }
-
-                // Calculate smooth progress along curve (0 to 1)
-                const rawProgress = this.introTime / this.introDuration;
-
-                // Apply easing for natural acceleration/deceleration
-                // Use sine easing for smooth start and end
-                const progress = 0.5 - 0.5 * Math.cos(rawProgress * Math.PI);
+                // Calculate progress (0 to 1) - use linear progress, curve handles smoothness
+                const progress = Math.min(this.introTime / this.introDuration, 1.0);
 
                 // Get position and look-at from smooth curves
                 const pos = this.introPathCurve.getPoint(progress);
                 const lookAt = this.introLookAtCurve.getPoint(progress);
 
                 this.camera.position.copy(pos);
-                this.camera.lookAt(lookAt);
 
-                // Smooth upside-down rotation in the last 25% of the journey
-                const flipStart = 0.75;
-                if (rawProgress > flipStart) {
-                    const flipProgress = (rawProgress - flipStart) / (1 - flipStart);
-                    // Use smooth sine curve for natural flip
-                    const smoothFlip = 0.5 - 0.5 * Math.cos(flipProgress * Math.PI);
-                    this.camera.rotation.z = smoothFlip * Math.PI;
+                // Calculate up vector that gradually rotates to upside-down
+                // Start rotating in the last 35% of journey for very gradual flip
+                const flipStart = 0.65;
+                let upVector = new THREE.Vector3(0, 1, 0);
+
+                if (progress > flipStart) {
+                    const flipProgress = (progress - flipStart) / (1 - flipStart);
+                    // Smooth cubic easing for gradual rotation
+                    const smoothFlip = flipProgress * flipProgress * (3 - 2 * flipProgress);
+                    // Rotate up vector from (0,1,0) to (0,-1,0)
+                    upVector.y = Math.cos(smoothFlip * Math.PI);
+                    upVector.x = Math.sin(smoothFlip * Math.PI) * 0.1; // Slight tilt
                 }
 
-                // Very subtle flight wobble
-                const wobble = Math.sin(this.introTime * 1.5) * 0.008;
-                this.camera.rotation.z += wobble;
+                // Use matrix lookAt with custom up vector for smooth rotation
+                const matrix = new THREE.Matrix4();
+                matrix.lookAt(pos, lookAt, upVector);
+                this.camera.quaternion.setFromRotationMatrix(matrix);
+
+                // If past intro duration, wait for transition
+                if (this.introTime >= this.introDuration + 1.5) {
+                    this.endIntro();
+                }
             }
 
             startIntro() {
