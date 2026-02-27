@@ -1741,15 +1741,6 @@
                         baseZ: z
                     });
                 }
-
-                // Entry arch back to cave
-                const entryArchGeometry = new THREE.TorusGeometry(8, 1.5, 8, 16, Math.PI);
-                const entryArchMesh = new THREE.Mesh(entryArchGeometry, this.echoMaterial.clone());
-                entryArchMesh.rotation.x = Math.PI / 2;
-                entryArchMesh.rotation.z = -Math.PI / 2;
-                entryArchMesh.position.set(52, 8, 0);
-                this.scene.add(entryArchMesh);
-                this.echoObjects.push(entryArchMesh);
             }
 
             emitPulse() {
