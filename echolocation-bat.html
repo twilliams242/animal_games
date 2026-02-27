@@ -1022,25 +1022,27 @@
                 // Intro flythrough state
                 this.introActive = false;  // Starts after button click
                 this.introTime = 0;
-                this.introDuration = 8.0;  // Total intro duration in seconds
+                this.introDuration = 9.5;  // Total intro duration in seconds
                 this.introLight = null;
                 // Wakeup transition: bat drops from ceiling and flips right side up
                 this.wakeupActive = false;
                 this.wakeupTime = 0;
                 this.wakeupDuration = 1.2;  // seconds to flip and drop
                 this.introWaypoints = [
-                    // Start inside cave near entrance, looking out at the arch
-                    { pos: new THREE.Vector3(38, 18, 5), lookAt: new THREE.Vector3(50, 12, 0), time: 0 },
-                    // Turn and glide deeper into cave, viewing curved ceiling
-                    { pos: new THREE.Vector3(15, 28, -8), lookAt: new THREE.Vector3(-15, 40, 5), time: 2.0 },
+                    // Start outside in the plains, approaching the cave entrance
+                    { pos: new THREE.Vector3(120, 20, 30), lookAt: new THREE.Vector3(50, 15, 0), time: 0 },
+                    // Swoop down toward the cave entrance
+                    { pos: new THREE.Vector3(75, 12, 10), lookAt: new THREE.Vector3(50, 10, 0), time: 2.0 },
+                    // Fly through the entrance into the cave
+                    { pos: new THREE.Vector3(45, 12, 0), lookAt: new THREE.Vector3(0, 20, 0), time: 3.5 },
+                    // Glide deeper, viewing the curved ceiling and stalactites
+                    { pos: new THREE.Vector3(10, 25, -10), lookAt: new THREE.Vector3(-20, 35, 5), time: 5.0 },
                     // Swoop low past stalagmites and pool
-                    { pos: new THREE.Vector3(-12, 5, 10), lookAt: new THREE.Vector3(-25, 0, -10), time: 3.5 },
-                    // Curve around, looking back across the dome
-                    { pos: new THREE.Vector3(-25, 25, -15), lookAt: new THREE.Vector3(10, 35, 10), time: 5.0 },
+                    { pos: new THREE.Vector3(-15, 8, 10), lookAt: new THREE.Vector3(-25, 5, -10), time: 6.5 },
                     // Rise toward domed ceiling near bat colony
-                    { pos: new THREE.Vector3(5, 45, 8), lookAt: new THREE.Vector3(10, 54, 8), time: 6.5 },
-                    // Final position: upside down on curved ceiling with colony
-                    { pos: new THREE.Vector3(10, 54, 8), lookAt: new THREE.Vector3(40, 15, 0), time: 8.0, upsideDown: true }
+                    { pos: new THREE.Vector3(0, 40, 5), lookAt: new THREE.Vector3(10, 50, 8), time: 8.0 },
+                    // Final position: hanging near the bat colony on the ceiling
+                    { pos: new THREE.Vector3(10, 52, 8), lookAt: new THREE.Vector3(30, 20, 0), time: 9.5, upsideDown: true }
                 ];
 
                 this.init();
@@ -1199,22 +1201,35 @@
                 // Scale to make it wider than tall (cavern shape)
                 caveGeometry.scale(1.0, caveHeight / caveRadius, 1.0);
 
-                // Add organic irregularity to vertices
+                // Add organic irregularity to vertices AND create entrance opening
                 const positions = caveGeometry.attributes.position.array;
                 for (let i = 0; i < positions.length; i += 3) {
                     const x = positions[i];
                     const y = positions[i + 1];
                     const z = positions[i + 2];
-                    // Create noise-like displacement based on position
-                    const noise = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 4 +
-                                  Math.sin(x * 0.3 + z * 0.2) * 2 +
-                                  Math.cos(y * 0.2 + x * 0.1) * 3;
-                    const dist = Math.sqrt(x * x + z * z);
-                    // Displace vertices outward/inward for bumpy walls
-                    const factor = 1 + noise * 0.08;
-                    positions[i] *= factor;
-                    positions[i + 1] *= factor;
-                    positions[i + 2] *= factor;
+
+                    // Check if vertex is in entrance region (positive X, low-mid Y, near Z center)
+                    // Entrance is roughly 16 units wide and 20 units tall
+                    const inEntranceX = x > 35;
+                    const inEntranceY = y > -15 && y < 18;
+                    const inEntranceZ = Math.abs(z) < 12;
+
+                    if (inEntranceX && inEntranceY && inEntranceZ) {
+                        // Push entrance vertices way out to create opening
+                        positions[i] = x * 3;  // Push X far out
+                        positions[i + 1] = y;
+                        positions[i + 2] = z;
+                    } else {
+                        // Create noise-like displacement based on position
+                        const noise = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 4 +
+                                      Math.sin(x * 0.3 + z * 0.2) * 2 +
+                                      Math.cos(y * 0.2 + x * 0.1) * 3;
+                        // Displace vertices outward/inward for bumpy walls
+                        const factor = 1 + noise * 0.08;
+                        positions[i] *= factor;
+                        positions[i + 1] *= factor;
+                        positions[i + 2] *= factor;
+                    }
                 }
                 caveGeometry.attributes.position.needsUpdate = true;
                 caveGeometry.computeVertexNormals();
